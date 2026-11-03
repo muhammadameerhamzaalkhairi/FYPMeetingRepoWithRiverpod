@@ -27,24 +27,32 @@ class MyApp extends StatelessWidget {
       title: 'Live Meet',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
         scaffoldBackgroundColor: const Color(0xFFF4F4F1),
         colorScheme: .fromSeed(seedColor: Color(0xFF111111)),
       ),
+      // Responsive: limits very large phone font settings so layouts don't
+      // break, and keeps the app a comfortable column (max 600 px wide) when
+      // opened on desktop/tablet.
+      builder: (context, child) {
+        final mq = MediaQuery.of(context);
+        return MediaQuery(
+          data: mq.copyWith(
+            textScaler: mq.textScaler.clamp(
+              minScaleFactor: 0.85,
+              maxScaleFactor: 1.15,
+            ),
+          ),
+          child: ColoredBox(
+            color: const Color(0xFFF4F4F1),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 600),
+                child: child,
+              ),
+            ),
+          ),
+        );
+      },
       home: Supabase.instance.client.auth.currentSession == null
           ? const LoginScreen()
           : const MainScreen(),

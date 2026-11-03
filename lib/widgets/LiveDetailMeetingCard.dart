@@ -57,29 +57,34 @@ class Livedetailmeetingcard extends StatelessWidget {
         : normalizedStatus == 'done'
         ? totalText
         : null;
+
+    // Responsive: tighter sizes on narrow phones so the title gets more room.
+    final narrow = MediaQuery.sizeOf(context).width < 360;
+    final pad = narrow ? 10.0 : 12.0;
+
     return GestureDetector(
       onTap: onTap,
 
       child: AnimatedContainer(
-        duration: Duration(milliseconds: 200),
+        duration: const Duration(milliseconds: 200),
         width: double.infinity,
-        margin: EdgeInsets.only(bottom: 10),
+        margin: const EdgeInsets.only(bottom: 10),
         decoration: BoxDecoration(
           color: isSelected ? const Color(0xFFDDF35C) : const Color(0xFFFFFFFF),
           borderRadius: BorderRadius.circular(20),
         ),
 
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: EdgeInsets.all(pad),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Row(
                 children: [
                   Container(
-                    width: 25,
-                    height: 25,
-                    padding: EdgeInsets.all(2),
+                    width: narrow ? 20 : 25,
+                    height: narrow ? 20 : 25,
+                    padding: const EdgeInsets.all(2),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(50),
                       color: Colors.white,
@@ -96,13 +101,13 @@ class Livedetailmeetingcard extends StatelessWidget {
                           )
                         : null,
                   ),
-                  SizedBox(width: 10),
+                  SizedBox(width: narrow ? 6 : 10),
                   CustomText(
                     text: number.toString(),
-                    fontSize: 32,
+                    fontSize: narrow ? 26 : 32,
                     fontWeight: FontWeight.bold,
                   ),
-                  SizedBox(width: 10),
+                  SizedBox(width: narrow ? 6 : 10),
                   Expanded(
                     flex: 6,
                     child: Column(
@@ -111,16 +116,17 @@ class Livedetailmeetingcard extends StatelessWidget {
                         CustomText(
                           text: title,
                           height: 1,
-                          fontSize: 18,
+                          fontSize: narrow ? 16 : 18,
                           fontWeight: FontWeight.bold,
                         ),
-                        SizedBox(height: 5),
+                        const SizedBox(height: 5),
                         Wrap(
                           spacing: 5,
                           runSpacing: 5,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             Container(
-                              padding: EdgeInsets.all(8),
+                              padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
                                 color: const Color.fromARGB(255, 219, 219, 219),
                                 borderRadius: BorderRadius.circular(25),
@@ -155,13 +161,14 @@ class Livedetailmeetingcard extends StatelessWidget {
                     flex: 1,
                     // FIX: onPressed was null, so the arrow was disabled
                     child: IconButton(
+                      padding: narrow ? EdgeInsets.zero : null,
                       onPressed: onExpand,
                       icon: isExpanded
-                          ? Icon(
+                          ? const Icon(
                               Icons.arrow_drop_up_rounded,
                               color: Colors.black,
                             )
-                          : Icon(
+                          : const Icon(
                               Icons.arrow_drop_down_rounded,
                               color: Colors.black,
                             ),
@@ -220,18 +227,18 @@ class Livedetailmeetingcard extends StatelessWidget {
                 ),
               ],
 
-              SizedBox(height: 10),
+              const SizedBox(height: 10),
 
               isSelected &&
                       normalizedStatus != 'done' &&
                       normalizedStatus != 'skipped'
                   ? Row(
-                      spacing: 10,
+                      spacing: narrow ? 6 : 10,
                       children: [
                         Expanded(
                           child: Button(
                             text: 'End',
-                            fontSize: 15,
+                            fontSize: narrow ? 14 : 15,
                             enabled: canEnd,
                             onTap: onEnd,
                           ),
@@ -239,7 +246,7 @@ class Livedetailmeetingcard extends StatelessWidget {
                         Expanded(
                           child: Button(
                             text: 'Start',
-                            fontSize: 15,
+                            fontSize: narrow ? 14 : 15,
                             enabled: canStart,
                             onTap: onStart,
                           ),
@@ -247,14 +254,14 @@ class Livedetailmeetingcard extends StatelessWidget {
                         Expanded(
                           child: Button(
                             text: isPaused ? 'Resume' : 'Pause',
-                            fontSize: 15,
+                            fontSize: narrow ? 14 : 15,
                             enabled: canPauseResume,
                             onTap: onPauseResume,
                           ),
                         ),
                       ],
                     )
-                  : SizedBox(),
+                  : const SizedBox(),
             ],
           ),
         ),

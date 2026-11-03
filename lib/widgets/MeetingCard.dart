@@ -26,7 +26,8 @@ class MeetingCard extends StatelessWidget {
     required this.onPauseResume,
     required this.onEnd,
     this.onRestart,
-    this.onEdit, this.onDelete,
+    this.onEdit,
+    this.onDelete,
   });
 
   Widget chip(String text) => Container(
@@ -51,13 +52,17 @@ class MeetingCard extends StatelessWidget {
     final enabled = !locked && !busy;
     final startedAt = meeting.startedAt;
 
+    // Responsive: tighter padding and smaller timer on narrow phones.
+    final narrow = MediaQuery.sizeOf(context).width < 360;
+    final pad = narrow ? 10.0 : 12.0;
+
     return Opacity(
       opacity: locked ? 0.5 : 1,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         width: double.infinity,
         margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(12),
+        padding: EdgeInsets.all(pad),
         decoration: BoxDecoration(
           color: meeting.isActive ? const Color(0xFFDDF35C) : Colors.white,
           borderRadius: BorderRadius.circular(20),
@@ -72,7 +77,7 @@ class MeetingCard extends StatelessWidget {
                 Expanded(
                   child: CustomText(
                     text: meeting.title,
-                    fontSize: 18,
+                    fontSize: narrow ? 16 : 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -137,7 +142,7 @@ class MeetingCard extends StatelessWidget {
                           frozenAt: meeting.pausedAt,
                         ),
                       ),
-                fontSize: 28,
+                fontSize: narrow ? 24 : 28,
                 fontWeight: FontWeight.bold,
               ),
             ],
@@ -160,7 +165,7 @@ class MeetingCard extends StatelessWidget {
                 Button(
                   text: 'Restore meeting',
                   height: 48,
-                  fontSize: 15,
+                  fontSize: narrow ? 14 : 15,
                   enabled: enabled,
                   onTap: onRestart,
                 ),
@@ -169,13 +174,13 @@ class MeetingCard extends StatelessWidget {
             if (meeting.status != 'done') ...[
               const SizedBox(height: 10),
               Row(
-                spacing: 10,
+                spacing: narrow ? 6 : 10,
                 children: [
                   Expanded(
                     child: Button(
                       text: 'Start',
                       height: 48,
-                      fontSize: 15,
+                      fontSize: narrow ? 14 : 15,
                       enabled: enabled && meeting.status == 'upcoming',
                       onTap: onStart,
                     ),
@@ -184,7 +189,7 @@ class MeetingCard extends StatelessWidget {
                     child: Button(
                       text: meeting.status == 'paused' ? 'Resume' : 'Pause',
                       height: 48,
-                      fontSize: 15,
+                      fontSize: narrow ? 14 : 15,
                       enabled: enabled && meeting.isActive,
                       onTap: onPauseResume,
                     ),
@@ -193,7 +198,7 @@ class MeetingCard extends StatelessWidget {
                     child: Button(
                       text: 'End',
                       height: 48,
-                      fontSize: 15,
+                      fontSize: narrow ? 14 : 15,
                       enabled: enabled && meeting.isActive,
                       onTap: onEnd,
                     ),

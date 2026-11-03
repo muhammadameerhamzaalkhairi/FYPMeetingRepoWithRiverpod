@@ -28,10 +28,18 @@ class _LoginScreenState extends State<LoginScreen> {
   final formKey = GlobalKey<FormState>();
   @override
   Widget build(BuildContext context) {
+    // Responsive: smaller paddings, logo and heading on narrow phones.
+    final narrow = MediaQuery.sizeOf(context).width < 360;
+
     return Scaffold(
       body: SingleChildScrollView(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(42, 80, 42, 42),
+          padding: EdgeInsets.fromLTRB(
+            narrow ? 24 : 42,
+            narrow ? 60 : 80,
+            narrow ? 24 : 42,
+            42,
+          ),
           child: Form(
             key: formKey,
             child: Column(
@@ -39,24 +47,35 @@ class _LoginScreenState extends State<LoginScreen> {
               children: [
                 Row(
                   children: [
-                    Image.asset('lib/assets/images/logo.png', height: 56),
-                    SizedBox(width: 10),
-                    CustomText(
-                      text: 'BIIT FYP Meetings',
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
+                    Image.asset(
+                      'lib/assets/images/logo.png',
+                      height: narrow ? 44 : 56,
+                    ),
+                    const SizedBox(width: 10),
+                    // Expanded + FittedBox: the app name scales down instead
+                    // of overflowing next to the logo on narrow screens.
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: CustomText(
+                          text: 'BIIT FYP Meetings',
+                          fontSize: narrow ? 20 : 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ],
                 ),
-                SizedBox(height: 80),
-                CustomText(text: 'Welcome back'),
+                SizedBox(height: narrow ? 50 : 80),
+                const CustomText(text: 'Welcome back'),
                 CustomText(
                   text: 'Sign in',
-                  fontSize: 48,
+                  fontSize: narrow ? 38 : 48,
                   fontWeight: FontWeight.w900,
                 ),
 
-                SizedBox(height: 20),
+                const SizedBox(height: 20),
                 TextBox(
                   hintText: 'Email',
                   controller: email,
@@ -72,7 +91,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     return null;
                   },
                 ),
-                SizedBox(height: 20),
+                const SizedBox(height: 20),
                 TextBox(
                   hintText: 'Password',
                   controller: password,
@@ -81,7 +100,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     icon: Icon(
                       obscurePassword ? Icons.visibility_off : Icons.visibility,
                     ),
-                    onPressed: () => setState(() => obscurePassword = !obscurePassword),
+                    onPressed: () =>
+                        setState(() => obscurePassword = !obscurePassword),
                   ),
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
@@ -90,7 +110,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     return null;
                   },
                 ),
-                SizedBox(height: 20),
+                const SizedBox(height: 20),
                 Button(
                   text: isLoading ? 'Signing in...' : 'Sign in',
                   enabled: !isLoading,

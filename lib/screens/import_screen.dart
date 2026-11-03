@@ -37,6 +37,9 @@ class _ImportScreenState extends State<ImportScreen> {
   bool busy = false;
   List<Map<String, dynamic>> rows = [];
 
+  // Responsive: true on small phones (width < 360 px).
+  bool get narrow => MediaQuery.sizeOf(context).width < 360;
+
   void resetState() {
     step = 'Step 1 of 2';
     isUploaded = false;
@@ -304,7 +307,12 @@ class _ImportScreenState extends State<ImportScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Padding(
-        padding: EdgeInsets.fromLTRB(18, 60, 18, 18),
+        padding: EdgeInsets.fromLTRB(
+          narrow ? 14 : 18,
+          60,
+          narrow ? 14 : 18,
+          18,
+        ),
         child: SingleChildScrollView(
           child: Center(
             child: Column(
@@ -313,25 +321,25 @@ class _ImportScreenState extends State<ImportScreen> {
                 CustomText(text: step),
                 CustomText(
                   text: 'Import schedule',
-                  fontSize: 38,
+                  fontSize: narrow ? 30 : 38,
                   fontWeight: FontWeight.w900,
                 ),
 
-                SizedBox(height: 10),
+                const SizedBox(height: 10),
 
                 GestureDetector(
                   onTap: busy ? null : pickFile,
                   child: AnimatedContainer(
                     width: double.infinity,
-                    padding: EdgeInsets.all(48),
-                    duration: Duration(milliseconds: 200),
+                    padding: EdgeInsets.all(narrow ? 24 : 48),
+                    duration: const Duration(milliseconds: 200),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(25),
                       border: Border.all(),
                     ),
                     child: Padding(
-                      padding: EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(8),
                       child: Column(
                         children: [
                           isUploaded
@@ -339,43 +347,51 @@ class _ImportScreenState extends State<ImportScreen> {
                                   children: [
                                     CustomText(
                                       text: fileName,
-                                      fontSize: 24,
+                                      fontSize: narrow ? 20 : 24,
                                       fontWeight: FontWeight.bold,
+                                      textAlign: TextAlign.center,
                                     ),
-                                    CustomText(text: summary),
+                                    CustomText(
+                                      text: summary,
+                                      textAlign: TextAlign.center,
+                                    ),
                                     if (alreadyAddedText.isNotEmpty)
                                       CustomText(
                                         text: alreadyAddedText,
                                         textAlign: TextAlign.center,
                                         color: alreadyAdded ? Colors.red : null,
                                       ),
-                                    CustomText(
+                                    const CustomText(
                                       text: 'Tap to choose another Excel file',
+                                      textAlign: TextAlign.center,
                                     ),
                                   ],
                                 )
-                              : CustomText(text: 'Tap to upload Excel file'),
+                              : const CustomText(
+                                  text: 'Tap to upload Excel file',
+                                  textAlign: TextAlign.center,
+                                ),
                         ],
                       ),
                     ),
                   ),
                 ),
 
-                SizedBox(height: 10),
+                const SizedBox(height: 10),
 
                 isError
                     ? AnimatedContainer(
-                        duration: Duration(milliseconds: 200),
+                        duration: const Duration(milliseconds: 200),
                         width: double.infinity,
-                        padding: EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: const Color.fromARGB(255, 255, 223, 221),
                           borderRadius: BorderRadius.circular(25),
                         ),
                         child: CustomText(text: errorText, color: Colors.red),
                       )
-                    : SizedBox(),
-                SizedBox(height: 10),
+                    : const SizedBox(),
+                const SizedBox(height: 10),
                 Button(
                   enabled: canImport && !busy,
                   text: hasExisting ? 'Update existing data' : 'Confirm import',

@@ -48,6 +48,9 @@ class _LiveScreenState extends State<LiveScreen> {
   String errorMessage = '';
   late final Timer ticker;
 
+  // Responsive: true on small phones (width < 360 px).
+  bool get narrow => MediaQuery.sizeOf(context).width < 360;
+
   @override
   void initState() {
     super.initState();
@@ -370,7 +373,7 @@ class _LiveScreenState extends State<LiveScreen> {
     final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
     return Scaffold(
       body: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 60, 18, 18),
+        padding: EdgeInsets.fromLTRB(narrow ? 14 : 18, 60, narrow ? 14 : 18, 18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -378,9 +381,9 @@ class _LiveScreenState extends State<LiveScreen> {
               CustomText(
                 text: formatDate(meeting?.meetingDate ?? DateTime.now()),
               ),
-              const CustomText(
+              CustomText(
                 text: 'Live',
-                fontSize: 38,
+                fontSize: narrow ? 30 : 38,
                 fontWeight: FontWeight.w900,
               ),
             ],
@@ -392,7 +395,7 @@ class _LiveScreenState extends State<LiveScreen> {
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
-                spacing: 10,
+                spacing: narrow ? 6 : 10,
                 children: [
                   for (var index = 0; index < filters.length; index++)
                     Filter(

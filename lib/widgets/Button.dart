@@ -21,7 +21,7 @@ class Button extends StatelessWidget {
     this.onTap,
     this.enabled = true,
     this.fontSize = 18,
-    this.height = 60, 
+    this.height = 60,
     this.fontWeight,
   });
 
@@ -39,14 +39,24 @@ class Button extends StatelessWidget {
         child: Opacity(
           opacity: enabled ? 1 : 0.4,
           child: Center(
-            child: Text(
-              text,
-              style: TextStyle(
-                color: color == null ? Colors.white : Colors.black,
-                fontSize: fontSize,
-                fontWeight: fontWeight
+            // Responsive: text shrinks to fit the button instead of wrapping
+            // onto a second line on narrow screens.
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  text,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: color == null ? Colors.white : Colors.black,
+                    fontSize: fontSize,
+                    fontWeight: fontWeight,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
               ),
-              textAlign: TextAlign.center,
             ),
           ),
         ),

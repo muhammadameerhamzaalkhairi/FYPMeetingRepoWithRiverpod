@@ -37,6 +37,9 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   String errorMessage = '';
   late final Timer ticker;
 
+  // Responsive: true on small phones (width < 360 px).
+  bool get narrow => MediaQuery.sizeOf(context).width < 360;
+
   @override
   void initState() {
     super.initState();
@@ -227,7 +230,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                 );
               }
               final meeting = visible[index];
-                            return MeetingCard(
+              return MeetingCard(
                 key: ValueKey(meeting.id),
                 meeting: meeting,
                 locked: active != null && active.id != meeting.id,
@@ -251,7 +254,6 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       },
     );
   }
-
 
   Future<void> deleteMeeting(Meeting meeting) async {
     if (busy || isLoading) return;
@@ -289,26 +291,25 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 60, 18, 18),
+        padding: EdgeInsets.fromLTRB(narrow ? 14 : 18, 60, narrow ? 14 : 18, 18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             CustomText(text: formatDate(DateTime.now())),
-            const CustomText(
+            CustomText(
               text: 'Meetings',
-              fontSize: 38,
+              fontSize: narrow ? 30 : 38,
               fontWeight: FontWeight.w900,
             ),
             const SizedBox(height: 10),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
-                spacing: 10,
+                spacing: narrow ? 6 : 10,
                 children: [
                   Filter(
                     text: 'Coming meetings',

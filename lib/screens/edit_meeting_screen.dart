@@ -80,6 +80,9 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
   bool busy = false;
   String errorMessage = '';
 
+  // Responsive: true on small phones (width < 360 px).
+  bool get narrow => MediaQuery.sizeOf(context).width < 360;
+
   @override
   void initState() {
     super.initState();
@@ -331,7 +334,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
     return Container(
       key: ValueKey(g.uid),
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(narrow ? 10 : 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
@@ -343,17 +346,17 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
               if (draggable)
                 ReorderableDragStartListener(
                   index: index,
-                  child: const Padding(
-                    padding: EdgeInsets.only(right: 8),
-                    child: Icon(Icons.drag_indicator_rounded),
+                  child: Padding(
+                    padding: EdgeInsets.only(right: narrow ? 4 : 8),
+                    child: const Icon(Icons.drag_indicator_rounded),
                   ),
                 ),
               CustomText(
                 text: '${index + 1}',
-                fontSize: 32,
+                fontSize: narrow ? 26 : 32,
                 fontWeight: FontWeight.bold,
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: narrow ? 6 : 10),
               Expanded(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
@@ -364,7 +367,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
                       CustomText(
                         text: g.project,
                         height: 1,
-                        fontSize: 18,
+                        fontSize: narrow ? 16 : 18,
                         fontWeight: FontWeight.bold,
                       ),
                       const SizedBox(height: 5),
@@ -381,15 +384,28 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
                 onPressed: busy ? null : () => editGroup(index),
                 icon: const Icon(Icons.edit_outlined),
                 color: Colors.black,
+                // Responsive: smaller tap area on narrow phones so the
+                // title gets more room.
+                visualDensity: narrow
+                    ? VisualDensity.compact
+                    : VisualDensity.standard,
+                padding: narrow ? const EdgeInsets.all(4) : null,
+                constraints: narrow ? const BoxConstraints() : null,
               ),
               IconButton(
-                onPressed: () => setState(() => expanded = isOpen ? null : g.uid),
+                onPressed: () =>
+                    setState(() => expanded = isOpen ? null : g.uid),
                 icon: Icon(
                   isOpen
                       ? Icons.arrow_drop_up_rounded
                       : Icons.arrow_drop_down_rounded,
                 ),
                 color: Colors.black,
+                visualDensity: narrow
+                    ? VisualDensity.compact
+                    : VisualDensity.standard,
+                padding: narrow ? const EdgeInsets.all(4) : null,
+                constraints: narrow ? const BoxConstraints() : null,
               ),
             ],
           ),
@@ -508,6 +524,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
   Widget build(BuildContext context) {
     final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
     final canEdit = !isLoading && errorMessage.isEmpty;
+    final sidePad = narrow ? 14.0 : 18.0;
     return PopScope(
       canPop: undoStack.isEmpty,
       onPopInvokedWithResult: (didPop, _) async {
@@ -532,7 +549,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
             : null,
         bottomNavigationBar: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+            padding: EdgeInsets.fromLTRB(sidePad, 8, sidePad, 12),
             child: Button(
               text: busy ? 'Saving...' : 'Save changes',
               enabled: canEdit && undoStack.isNotEmpty && !busy,
@@ -541,7 +558,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
           ),
         ),
         body: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 60, 18, 0),
+          padding: EdgeInsets.fromLTRB(sidePad, 60, sidePad, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -549,7 +566,9 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
                 children: [
                   IconButton(
                     tooltip: 'Back',
-                    onPressed: busy ? null : () => Navigator.of(context).maybePop(),
+                    onPressed: busy
+                        ? null
+                        : () => Navigator.of(context).maybePop(),
                     icon: const Icon(Icons.arrow_back),
                     color: const Color(0xFF111111),
                   ),
@@ -576,9 +595,9 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
               ),
               if (!keyboardVisible) ...[
                 CustomText(text: formatDate(widget.meeting.meetingDate)),
-                const CustomText(
+                CustomText(
                   text: 'Edit meeting',
-                  fontSize: 38,
+                  fontSize: narrow ? 30 : 38,
                   fontWeight: FontWeight.w900,
                 ),
                 CustomText(
@@ -669,7 +688,9 @@ class _GroupEditorState extends State<_GroupEditor> {
     for (final s in students) {
       final reg = s.reg.text.trim().toLowerCase();
       if (!seen.add(reg) || widget.takenRegs.contains(reg)) {
-        setState(() => error = 'Reg # ${s.reg.text.trim()} is already used in this meeting.');
+        setState(
+          () => error = 'Reg # ${s.reg.text.trim()} is already used in this meeting.',
+        );
         return;
       }
     }
@@ -689,10 +710,15 @@ class _GroupEditorState extends State<_GroupEditor> {
 
   @override
   Widget build(BuildContext context) {
+    // Responsive: tighter padding and heading on narrow phones.
+    final narrow = MediaQuery.sizeOf(context).width < 360;
+
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(18),
+        padding: EdgeInsets.all(narrow ? 14 : 18),
         child: Form(
           key: formKey,
           child: Column(
@@ -700,7 +726,7 @@ class _GroupEditorState extends State<_GroupEditor> {
             children: [
               CustomText(
                 text: widget.group == null ? 'New group' : 'Edit group',
-                fontSize: 28,
+                fontSize: narrow ? 24 : 28,
                 fontWeight: FontWeight.w900,
               ),
               const SizedBox(height: 15),
@@ -725,7 +751,7 @@ class _GroupEditorState extends State<_GroupEditor> {
               for (var i = 0; i < students.length; i++)
                 Container(
                   margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(12),
+                  padding: EdgeInsets.all(narrow ? 10 : 12),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
@@ -772,7 +798,7 @@ class _GroupEditorState extends State<_GroupEditor> {
               Button(
                 text: 'Add student',
                 height: 44,
-                fontSize: 14,
+                fontSize: narrow ? 13 : 14,
                 color: Colors.white,
                 onTap: () => setState(() => students.add(_StudentCtrl())),
               ),
@@ -782,13 +808,13 @@ class _GroupEditorState extends State<_GroupEditor> {
               ],
               const SizedBox(height: 15),
               Row(
-                spacing: 10,
+                spacing: narrow ? 6 : 10,
                 children: [
                   Expanded(
                     child: Button(
                       text: 'Close',
                       height: 50,
-                      fontSize: 15,
+                      fontSize: narrow ? 14 : 15,
                       color: Colors.white,
                       onTap: () => Navigator.pop(context),
                     ),
@@ -797,7 +823,7 @@ class _GroupEditorState extends State<_GroupEditor> {
                     child: Button(
                       text: widget.group == null ? 'Add' : 'Save',
                       height: 50,
-                      fontSize: 15,
+                      fontSize: narrow ? 14 : 15,
                       onTap: submit,
                     ),
                   ),

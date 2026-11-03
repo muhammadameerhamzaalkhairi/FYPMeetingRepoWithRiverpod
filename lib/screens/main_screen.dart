@@ -31,11 +31,14 @@ class _MainScreenState extends State<MainScreen> {
     setState(() => busy = value);
   }
 
-  Widget navigationButton(String label, int tabIndex) {
+  Widget navigationButton(String label, int tabIndex, {required bool narrow}) {
     return Expanded(
       child: Button(
         text: label,
-        fontSize: 14,
+        // Responsive: slightly smaller text and height on narrow phones.
+        // Button already shrinks its text to fit on one line.
+        fontSize: narrow ? 13 : 14,
+        height: narrow ? 52 : 60,
         color: index == tabIndex ? const Color(0xFFDDF35C) : Colors.white,
         foreColor: index == tabIndex ? Colors.black : Colors.white,
         onTap: () => go(tabIndex),
@@ -46,6 +49,10 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Responsive: tighter nav bar spacing on narrow phones so the four
+    // buttons get more room.
+    final narrow = MediaQuery.sizeOf(context).width < 360;
+
     return Scaffold(
       body: [
         DashboardScreen(onNavigate: go, onBusyChanged: setBusy),
@@ -53,23 +60,27 @@ class _MainScreenState extends State<MainScreen> {
         MeetingsScreen(onNavigate: go, onBusyChanged: setBusy),
         ImportScreen(onNavigate: go, onBusyChanged: setBusy),
       ][index],
-      bottomNavigationBar: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(12),
-        margin: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(50),
-          color: Colors.black,
-        ),
-        width: double.infinity,
-        child: Row(
-          spacing: 6,
-          children: [
-            navigationButton('Home', kHome),
-            navigationButton('Live', kLive),
-            navigationButton('Meetings', kMeetings),
-            navigationButton('Import', kImport),
-          ],
+      bottomNavigationBar: SafeArea(
+        // Keeps the nav bar clear of the system gesture/navigation bar.
+        top: false,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: EdgeInsets.all(narrow ? 8 : 12),
+          margin: EdgeInsets.all(narrow ? 8 : 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(50),
+            color: Colors.black,
+          ),
+          width: double.infinity,
+          child: Row(
+            spacing: narrow ? 4 : 6,
+            children: [
+              navigationButton('Home', kHome, narrow: narrow),
+              navigationButton('Live', kLive, narrow: narrow),
+              navigationButton('Meetings', kMeetings, narrow: narrow),
+              navigationButton('Import', kImport, narrow: narrow),
+            ],
+          ),
         ),
       ),
     );
