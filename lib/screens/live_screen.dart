@@ -301,6 +301,12 @@ class _LiveScreenState extends State<LiveScreen> {
                                   ? Colors.red
                                   : null,
                             ),
+
+                            if (errorMessage.isNotEmpty) ...[
+                              const SizedBox(height: 10),
+                              Button(text: 'Retry', onTap: loadMeeting),
+                            ],
+
                             if (errorMessage.isEmpty && meeting == null) ...[
                               const SizedBox(height: 10),
                               const CustomText(

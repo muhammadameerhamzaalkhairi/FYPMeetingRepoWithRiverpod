@@ -1,0 +1,192 @@
+// PROPOSED TEST — NOT EXECUTED, NOT IN test/.
+// To use: copy to test/meeting_card_test.dart after reviewing the expected values.
+// Covers MeetingCard status rendering, enablement, and delete/edit affordances.
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:livemeet/models/meeting.dart';
+import 'package:livemeet/widgets/MeetingCard.dart';
+
+Meeting meetingFor(String status) {
+  final active = status == 'running' || status == 'paused';
+  final done = status == 'done';
+  return Meeting(
+    id: 1,
+    title: 'Meeting Schedule Fall 2026',
+    meetingDate: DateTime(2026, 10, 13),
+    status: status,
+    startedAt: active || done ? DateTime(2026, 10, 13, 11, 0) : null,
+    endedAt: done ? DateTime(2026, 10, 13, 12, 2) : null,
+    pausedAt: status == 'paused' ? DateTime(2026, 10, 13, 11, 30) : null,
+    pausedSeconds: status == 'paused' ? 1800 : 0,
+    totalSeconds: done ? 3720 : null,
+    groupsTotal: 35,
+    studentsTotal: 133,
+    groupsDone: done ? 33 : 0,
+    groupsSkipped: done ? 2 : 0,
+    groupsRemaining: done ? 0 : 35,
+  );
+}
+
+Widget host(Widget child) => MaterialApp(
+  home: Scaffold(body: SingleChildScrollView(child: child)),
+);
+
+void main() {
+  testWidgets('upcoming card shows status and not-started text', (tester) async {
+    await tester.pumpWidget(
+      host(
+        MeetingCard(
+          meeting: meetingFor('upcoming'),
+          locked: false,
+          busy: false,
+          onStart: () {},
+          onPauseResume: () {},
+          onEnd: () {},
+        ),
+      ),
+    );
+
+    expect(find.text('Upcoming'), findsOneWidget);
+    expect(find.text('Not started'), findsOneWidget);
+    expect(find.text('35 groups · 133 students'), findsOneWidget);
+    expect(find.text('Start'), findsOneWidget);
+  });
+
+  testWidgets('start callback fires when enabled', (tester) async {
+    var starts = 0;
+    await tester.pumpWidget(
+      host(
+        MeetingCard(
+          meeting: meetingFor('upcoming'),
+          locked: false,
+          busy: false,
+          onStart: () => starts++,
+          onPauseResume: () {},
+          onEnd: () {},
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Start'));
+    await tester.pump();
+    expect(starts, 1);
+  });
+
+  testWidgets('locked card does not fire actions', (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(
+      host(
+        MeetingCard(
+          meeting: meetingFor('upcoming'),
+          locked: true,
+          busy: false,
+          onStart: () => calls++,
+          onPauseResume: () => calls++,
+          onEnd: () => calls++,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Start'));
+    await tester.pump();
+    expect(calls, 0);
+  });
+
+  testWidgets('running card shows Pause and End', (tester) async {
+    await tester.pumpWidget(
+      host(
+        MeetingCard(
+          meeting: meetingFor('running'),
+          locked: false,
+          busy: false,
+          onStart: () {},
+          onPauseResume: () {},
+          onEnd: () {},
+        ),
+      ),
+    );
+
+    expect(find.text('Running'), findsOneWidget);
+    expect(find.text('Pause'), findsOneWidget);
+    expect(find.text('End'), findsOneWidget);
+  });
+
+  testWidgets('paused card shows Resume', (tester) async {
+    await tester.pumpWidget(
+      host(
+        MeetingCard(
+          meeting: meetingFor('paused'),
+          locked: false,
+          busy: false,
+          onStart: () {},
+          onPauseResume: () {},
+          onEnd: () {},
+        ),
+      ),
+    );
+
+    expect(find.text('Paused'), findsOneWidget);
+    expect(find.text('Resume'), findsOneWidget);
+  });
+
+  testWidgets('done card shows totals and Restore when wired', (tester) async {
+    await tester.pumpWidget(
+      host(
+        MeetingCard(
+          meeting: meetingFor('done'),
+          locked: false,
+          busy: false,
+          onStart: () {},
+          onPauseResume: () {},
+          onEnd: () {},
+          onRestart: () {},
+        ),
+      ),
+    );
+
+    expect(find.text('Done'), findsOneWidget);
+    expect(find.textContaining('Total 1h 2m'), findsOneWidget);
+    expect(find.textContaining('Done 33 · Skipped 2'), findsOneWidget);
+    expect(find.text('Restore meeting'), findsOneWidget);
+    expect(find.text('Start'), findsNothing);
+  });
+
+  testWidgets('delete icon calls onDelete when provided', (tester) async {
+    var deletes = 0;
+    await tester.pumpWidget(
+      host(
+        MeetingCard(
+          meeting: meetingFor('done'),
+          locked: false,
+          busy: false,
+          onStart: () {},
+          onPauseResume: () {},
+          onEnd: () {},
+          onDelete: () => deletes++,
+        ),
+      ),
+    );
+
+    await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+    await tester.pump();
+    expect(deletes, 1);
+  });
+
+  testWidgets('delete icon is absent when onDelete is null (H-04 target)', (tester) async {
+    await tester.pumpWidget(
+      host(
+        MeetingCard(
+          meeting: meetingFor('done'),
+          locked: false,
+          busy: false,
+          onStart: () {},
+          onPauseResume: () {},
+          onEnd: () {},
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.delete_outline_rounded), findsNothing);
+  });
+}

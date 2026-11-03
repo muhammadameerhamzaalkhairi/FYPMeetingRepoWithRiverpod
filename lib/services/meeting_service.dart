@@ -89,4 +89,29 @@ class MeetingService {
       params: {'p_meeting': meetingId, 'p_group': groupNo},
     );
   }
+
+
+
+
+    static Future<void> saveSchedule(
+    int meetingId,
+    List<Map<String, dynamic>> rows,
+  ) async {
+    await _db.rpc(
+      'save_meeting_schedule',
+      params: {'p_id': meetingId, 'p_rows': rows},
+    );
+  }
+
+  static Future<void> deleteMeeting(int id) async {
+    final deleted = await _db
+        .from('meetings')
+        .delete()
+        .eq('id', id)
+        .eq('status', 'upcoming')
+        .select();
+    if (deleted.isEmpty) {
+      throw Exception('Only upcoming meetings can be deleted');
+    }
+  }
 }

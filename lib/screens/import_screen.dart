@@ -3,6 +3,7 @@ import 'package:livemeet/screens/main_screen.dart';
 import 'package:livemeet/services/meeting_service.dart';
 import 'package:livemeet/widgets/Button.dart';
 import 'package:livemeet/widgets/CustomText.dart';
+import 'package:livemeet/widgets/confirm_dialog.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -30,10 +31,26 @@ class _ImportScreenState extends State<ImportScreen> {
   String summary = '';
   String meetingTitle = '';
   String alreadyAddedText = '';
-  bool alreadyAdded = false;
+  bool alreadyAdded = false; // sab dates pehle se mojood
+  bool hasExisting = false; // kam az kam ek date pehle se mojood -> update hoga
   bool canImport = false;
   bool busy = false;
   List<Map<String, dynamic>> rows = [];
+
+  void resetState() {
+    step = 'Step 1 of 2';
+    isUploaded = false;
+    canImport = false;
+    isError = false;
+    errorText = '';
+    alreadyAddedText = '';
+    alreadyAdded = false;
+    hasExisting = false;
+    rows = [];
+    fileName = '';
+    summary = '';
+    meetingTitle = '';
+  }
 
   String cellText(Data? cell) {
     final v = cell?.value;
@@ -78,19 +95,7 @@ class _ImportScreenState extends State<ImportScreen> {
       // user ne cancel kar diya
       if (file == null) return;
 
-      setState(() {
-        step = 'Step 1 of 2';
-        isUploaded = false;
-        canImport = false;
-        isError = false;
-        errorText = '';
-        alreadyAddedText = '';
-        alreadyAdded = false;
-        rows = [];
-        fileName = '';
-        summary = '';
-        meetingTitle = '';
-      });
+      setState(resetState);
       final bytes = await file.readAsBytes();
       if (!mounted) return;
       final excel = Excel.decodeBytes(bytes);
@@ -99,9 +104,12 @@ class _ImportScreenState extends State<ImportScreen> {
       }
       final sheet = excel.tables[excel.tables.keys.first]!;
       final sheetRows = sheet.rows;
-      final title = sheetRows.isEmpty || sheetRows.first.isEmpty
+      // New file format has no title row: row 1 is the header (S.No., Reg #, ...).
+      // In that case the meeting title comes from the file name.
+      final firstCell = sheetRows.isEmpty || sheetRows.first.isEmpty
           ? ''
           : cellText(sheetRows.first.first);
+      final title = firstCell.toLowerCase().startsWith('s.no') ? '' : firstCell;
       final parsedTitle = title.isEmpty
           ? file.name.replaceFirst(RegExp(r'\.xlsx$', caseSensitive: false), '')
           : title;
@@ -185,12 +193,14 @@ class _ImportScreenState extends State<ImportScreen> {
         isError = false;
         step = 'Step 2 of 2';
         alreadyAdded = existingCount == days;
+        hasExisting = existingCount > 0;
         alreadyAddedText = alreadyAdded
-            ? 'Already added'
+            ? 'Already added. Importing this file will update the previous data with the changes in this file.'
             : existingCount > 0
-            ? '$existingCount of $days days already added. The rest will be imported.'
+            ? '$existingCount of $days days already added. Those will be updated, the rest will be imported.'
             : '';
-        canImport = !alreadyAdded;
+        // ab already-added hone par bhi import (update) allowed hai
+        canImport = true;
       });
     } on PostgrestException catch (e) {
       showImportError(e.message);
@@ -216,39 +226,66 @@ class _ImportScreenState extends State<ImportScreen> {
     if (!canImport || busy) return;
     setState(() => busy = true);
     try {
+      // Pehle se mojood data update hoga -> pehle confirmation lo
+      if (hasExisting) {
+        final confirmed = await showConfirmDialog(
+          context,
+          title: 'Update existing data?',
+          message:
+              'This file will update the already added meeting data for "$meetingTitle". Students no longer in the file will be removed from upcoming meetings.',
+          confirmText: 'Update',
+        );
+        if (!mounted) return;
+        if (!confirmed) return;
+      }
+
       widget.onBusyChanged(true);
-      final result = await MeetingService.importSchedule(meetingTitle, rows);
-      if (!mounted) return;
-      if (result.isEmpty) {
-        throw const FormatException('No import result was returned.');
+
+      if (hasExisting) {
+        final raw = await Supabase.instance.client.rpc(
+          'update_schedule',
+          params: {'p_title': meetingTitle, 'p_rows': rows},
+        );
+        if (!mounted) return;
+        final result = (raw as List<dynamic>)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        if (result.isEmpty) {
+          throw const FormatException('No import result was returned.');
+        }
+        final updated = result.where((r) => r['state'] == 'updated').length;
+        final added = result.where((r) => r['state'] == 'added').length;
+        final locked = result.where((r) => r['state'] == 'locked').length;
+
+        if (updated + added == 0) {
+          throw const FormatException(
+            'These meetings have already started or finished, so they cannot be updated.',
+          );
+        }
+
+        final parts = <String>[
+          if (updated > 0) '$updated meeting(s) updated',
+          if (added > 0) '$added meeting(s) added',
+          if (locked > 0) '$locked skipped (already started/finished)',
+        ];
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(parts.join(' · '))));
+      } else {
+        final result = await MeetingService.importSchedule(meetingTitle, rows);
+        if (!mounted) return;
+        if (result.isEmpty) {
+          throw const FormatException('No import result was returned.');
+        }
+        final added = result
+            .where((item) => item['already_added'] != true)
+            .length;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$added meeting(s) added')));
       }
-      if (result.every((item) => item['already_added'] == true)) {
-        setState(() {
-          alreadyAdded = true;
-          alreadyAddedText = 'Already added';
-          canImport = false;
-        });
-        return;
-      }
-      final added = result
-          .where((item) => item['already_added'] != true)
-          .length;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$added meeting(s) added')));
-      setState(() {
-        step = 'Step 1 of 2';
-        isUploaded = false;
-        canImport = false;
-        isError = false;
-        fileName = '';
-        meetingTitle = '';
-        summary = '';
-        rows = [];
-        errorText = '';
-        alreadyAddedText = '';
-        alreadyAdded = false;
-      });
+
+      setState(resetState);
       widget.onBusyChanged(false);
       widget.onNavigate(kMeetings);
     } on PostgrestException catch (e) {
@@ -309,6 +346,7 @@ class _ImportScreenState extends State<ImportScreen> {
                                     if (alreadyAddedText.isNotEmpty)
                                       CustomText(
                                         text: alreadyAddedText,
+                                        textAlign: TextAlign.center,
                                         color: alreadyAdded ? Colors.red : null,
                                       ),
                                     CustomText(
@@ -340,7 +378,7 @@ class _ImportScreenState extends State<ImportScreen> {
                 SizedBox(height: 10),
                 Button(
                   enabled: canImport && !busy,
-                  text: 'Confirm import',
+                  text: hasExisting ? 'Update existing data' : 'Confirm import',
                   onTap: confirmImport,
                 ),
               ],

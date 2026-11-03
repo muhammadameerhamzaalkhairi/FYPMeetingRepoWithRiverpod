@@ -1,0 +1,89 @@
+// PROPOSED TEST — NOT EXECUTED, NOT IN test/.
+// To use: copy to test/meeting_model_test.dart after reviewing the expected values.
+// Covers Meeting.fromMap parsing and isActive.
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:livemeet/models/meeting.dart';
+
+Map<String, dynamic> row({
+  Object? startedAt,
+  Object? endedAt,
+  Object? pausedAt,
+  Object? totalSeconds = 3600,
+  String status = 'upcoming',
+}) => {
+  'id': 7,
+  'title': 'Meeting Schedule Fall 2026',
+  'meeting_date': '2026-10-13',
+  'status': status,
+  'started_at': startedAt,
+  'ended_at': endedAt,
+  'paused_at': pausedAt,
+  'paused_seconds': 30,
+  'total_seconds': totalSeconds,
+  'groups_total': 35,
+  'students_total': 133,
+  'groups_done': 2,
+  'groups_skipped': 1,
+  'groups_remaining': 32,
+};
+
+void main() {
+  test('parses scalar and date fields', () {
+    final meeting = Meeting.fromMap(row());
+
+    expect(meeting.id, 7);
+    expect(meeting.title, 'Meeting Schedule Fall 2026');
+    expect(meeting.meetingDate, DateTime(2026, 10, 13));
+    expect(meeting.status, 'upcoming');
+    expect(meeting.pausedSeconds, 30);
+    expect(meeting.totalSeconds, 3600);
+    expect(meeting.groupsTotal, 35);
+    expect(meeting.studentsTotal, 133);
+    expect(meeting.groupsDone, 2);
+    expect(meeting.groupsSkipped, 1);
+    expect(meeting.groupsRemaining, 32);
+  });
+
+  test('parses null and ISO timestamps', () {
+    final meeting = Meeting.fromMap(
+      row(
+        status: 'running',
+        startedAt: '2026-10-13T11:00:00+05:00',
+        endedAt: null,
+        pausedAt: '2026-10-13T11:15:00+05:00',
+        totalSeconds: null,
+      ),
+    );
+
+    expect(meeting.startedAt, DateTime.parse('2026-10-13T11:00:00+05:00'));
+    expect(meeting.endedAt, isNull);
+    expect(meeting.pausedAt, DateTime.parse('2026-10-13T11:15:00+05:00'));
+    expect(meeting.totalSeconds, isNull);
+  });
+
+  test('isActive is true only for running and paused', () {
+    expect(Meeting.fromMap(row(status: 'upcoming')).isActive, isFalse);
+    expect(Meeting.fromMap(row(status: 'running')).isActive, isTrue);
+    expect(Meeting.fromMap(row(status: 'paused')).isActive, isTrue);
+    expect(Meeting.fromMap(row(status: 'done')).isActive, isFalse);
+  });
+
+  test('accepts numeric values exposed as num', () {
+    final data = row();
+    data['id'] = 7.0;
+    data['groups_total'] = 35.0;
+    data['groups_done'] = 2.0;
+    final meeting = Meeting.fromMap(data);
+
+    expect(meeting.id, 7);
+    expect(meeting.groupsTotal, 35);
+    expect(meeting.groupsDone, 2);
+  });
+
+  test('documents the null-field crash risk for M-03', () {
+    final data = row();
+    data['title'] = null;
+    expect(() => Meeting.fromMap(data), throwsA(isA<TypeError>()));
+  });
+}

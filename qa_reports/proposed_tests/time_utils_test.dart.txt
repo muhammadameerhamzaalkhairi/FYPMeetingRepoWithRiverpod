@@ -1,0 +1,106 @@
+// PROPOSED TEST — NOT EXECUTED, NOT IN test/.
+// To use: copy to test/time_utils_test.dart after reviewing the expected values.
+// Covers TIME-01 .. TIME-09 and the time-math portions of TIMER findings.
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:livemeet/utils/time_utils.dart';
+
+void main() {
+  group('formatClock', () {
+    test('formats below one hour as mm:ss', () {
+      expect(formatClock(0), '00:00');
+      expect(formatClock(59), '00:59');
+      expect(formatClock(60), '01:00');
+      expect(formatClock(3599), '59:59');
+    });
+
+    test('formats one hour and above as h:mm:ss', () {
+      expect(formatClock(3600), '1:00:00');
+      expect(formatClock(3661), '1:01:01');
+    });
+
+    test('clamps negative values to zero', () {
+      expect(formatClock(-1), '00:00');
+      expect(formatClock(-3600), '00:00');
+    });
+  });
+
+  group('formatTotal', () {
+    test('formats minutes and hours', () {
+      expect(formatTotal(0), '<1 min');
+      expect(formatTotal(59), '<1 min');
+      expect(formatTotal(60), '1 min');
+      expect(formatTotal(3599), '59 min');
+      expect(formatTotal(3600), '1h 0m');
+      expect(formatTotal(4320), '1h 12m');
+    });
+
+    test('does not label a negative duration as <1 min', () {
+      // Regression for L-04; this assertion currently fails.
+      expect(formatTotal(-1), isNot('<1 min'));
+    });
+  });
+
+  group('formatTime', () {
+    test('uses 12-hour clock and local time', () {
+      expect(formatTime(DateTime(2026, 10, 13, 0, 0)), '12:00 AM');
+      expect(formatTime(DateTime(2026, 10, 13, 11, 22)), '11:22 AM');
+      expect(formatTime(DateTime(2026, 10, 13, 12, 0)), '12:00 PM');
+      expect(formatTime(DateTime(2026, 10, 13, 23, 59)), '11:59 PM');
+    });
+  });
+
+  group('formatDate', () {
+    test('keeps calendar date fields and uses English labels', () {
+      expect(formatDate(DateTime(2026, 10, 13)), 'Tue, 13 Oct 2026');
+      expect(formatDate(DateTime(2026, 1, 1)), 'Thu, 1 Jan 2026');
+    });
+  });
+
+  group('elapsedSec', () {
+    final started = DateTime(2026, 10, 13, 11, 0, 0);
+
+    test('uses endedAt and subtracts paused seconds', () {
+      expect(
+        elapsedSec(
+          startedAt: started,
+          endedAt: DateTime(2026, 10, 13, 11, 1, 30),
+          pausedSeconds: 10,
+        ),
+        80,
+      );
+    });
+
+    test('uses frozenAt while paused', () {
+      expect(
+        elapsedSec(
+          startedAt: started,
+          frozenAt: DateTime(2026, 10, 13, 11, 0, 45),
+          pausedSeconds: 5,
+        ),
+        40,
+      );
+    });
+
+    test('clamps at zero', () {
+      expect(
+        elapsedSec(
+          startedAt: started,
+          endedAt: DateTime(2026, 10, 13, 10, 59, 0),
+        ),
+        0,
+      );
+    });
+  });
+
+  group('server offset', () {
+    tearDown(() => serverOffset = Duration.zero);
+
+    test('nowServer applies the stored offset', () {
+      serverOffset = const Duration(minutes: 2);
+      final before = DateTime.now().add(serverOffset);
+      final actual = nowServer();
+      expect(actual.difference(before).inSeconds.abs(), lessThanOrEqualTo(1));
+    });
+  });
+}

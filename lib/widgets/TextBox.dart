@@ -9,6 +9,7 @@ class TextBox extends StatelessWidget {
   final bool obscureText;
   final TextInputType? keyboardType;
   final String? Function(String?)? validator;
+  final Widget? suffixIcon;
 
   const TextBox({
     super.key,
@@ -17,6 +18,7 @@ class TextBox extends StatelessWidget {
     this.obscureText = false,
     this.keyboardType,
     this.validator,
+    this.suffixIcon,
   });
 
   @override
@@ -28,6 +30,7 @@ class TextBox extends StatelessWidget {
       validator: validator,
       decoration: InputDecoration(
         hintText: hintText,
+        suffixIcon: suffixIcon,
         fillColor: Colors.white,
         filled: true,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(50)),

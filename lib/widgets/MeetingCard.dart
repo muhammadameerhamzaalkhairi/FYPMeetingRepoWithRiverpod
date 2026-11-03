@@ -15,7 +15,8 @@ class MeetingCard extends StatelessWidget {
   final VoidCallback onPauseResume;
   final VoidCallback onEnd;
   final VoidCallback? onRestart;
-
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
   const MeetingCard({
     super.key,
     required this.meeting,
@@ -25,6 +26,7 @@ class MeetingCard extends StatelessWidget {
     required this.onPauseResume,
     required this.onEnd,
     this.onRestart,
+    this.onEdit, this.onDelete,
   });
 
   Widget chip(String text) => Container(
@@ -64,10 +66,43 @@ class MeetingCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            CustomText(
-              text: meeting.title,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: CustomText(
+                    text: meeting.title,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (onEdit != null)
+                  GestureDetector(
+                    onTap: busy ? null : onEdit,
+                    child: Opacity(
+                      opacity: busy ? 0.4 : 1,
+                      child: const Padding(
+                        padding: EdgeInsets.only(left: 8),
+                        child: Icon(Icons.settings_outlined, size: 24),
+                      ),
+                    ),
+                  ),
+                if (onDelete != null)
+                  GestureDetector(
+                    onTap: busy ? null : onDelete,
+                    child: Opacity(
+                      opacity: busy ? 0.4 : 1,
+                      child: const Padding(
+                        padding: EdgeInsets.only(left: 8),
+                        child: Icon(
+                          Icons.delete_outline_rounded,
+                          size: 24,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 5),
             Row(
@@ -123,7 +158,7 @@ class MeetingCard extends StatelessWidget {
               if (onRestart != null) ...[
                 const SizedBox(height: 10),
                 Button(
-                  text: 'Restart',
+                  text: 'Restore meeting',
                   height: 48,
                   fontSize: 15,
                   enabled: enabled,

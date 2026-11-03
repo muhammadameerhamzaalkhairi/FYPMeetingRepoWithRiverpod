@@ -32,6 +32,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool busy = false;
   String errorMessage = '';
   late final Timer ticker;
+  bool liveExpanded = false;
 
   @override
   void initState() {
@@ -93,7 +94,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final confirmed = await showConfirmDialog(
         context,
         title: 'Logout?',
-        message: 'Sign out of Live Meet?',
+        message: 'Are you sure you want to sign out of Live Meet?',
+        confirmText: 'Logout',
       );
       if (!mounted) return;
       if (!confirmed) return;
@@ -207,11 +209,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ),
   );
 
-  Widget liveCard(Meeting active) {
-    final running = runningGroup;
-    final started = running?['started_at'] as String?;
-    final meetingStarted = active.startedAt;
-    return Container(
+Widget liveCard(Meeting active) {
+  final running = runningGroup;
+  final started = running?['started_at'] as String?;
+  final meetingStarted = active.startedAt;
+  final isPaused = active.status == 'paused';
+
+  return AnimatedSize(
+    duration: const Duration(milliseconds: 250),
+    curve: Curves.easeInOut,
+    alignment: Alignment.topCenter,
+    child: Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -221,128 +229,179 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: CustomText(
-                  text: active.title,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 28,
-                  height: 1,
+          // ---------- HEADER (hamesha visible, tap se expand/collapse) ----------
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() => liveExpanded = !liveExpanded),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CustomText(
+                        text: active.title,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 32,
+                        height: 1,
+                      ),
+                      const SizedBox(height: 12),
+                      CustomText(
+                        text: meetingStarted == null
+                            ? '—'
+                            : formatClock(
+                                elapsedSec(
+                                  startedAt: meetingStarted,
+                                  pausedSeconds: active.pausedSeconds,
+                                  frozenAt: active.pausedAt,
+                                ),
+                              ),
+                        fontSize: 44,
+                        fontWeight: FontWeight.w900,
+                        height: 1,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color.fromARGB(255, 219, 219, 219),
-                  borderRadius: BorderRadius.circular(25),
-                ),
-                child: CustomText(
-                  text: active.status == 'paused' ? 'Paused' : 'Live',
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          // const CustomText(text: 'Meeting time', fontWeight: FontWeight.w600),
-          // CustomText(
-          //   text: meetingStarted == null
-          //       ? '—'
-          //       : formatClock(
-          //           elapsedSec(
-          //             startedAt: meetingStarted,
-          //             pausedSeconds: active.pausedSeconds,
-          //             frozenAt: active.pausedAt,
-          //           ),
-          //         ),
-          //   fontSize: 28,
-          //   fontWeight: FontWeight.bold,
-          // ),
-          // const SizedBox(height: 15),
-          if (running != null) ...[
-            CustomText(
-              text: 'Group ${running['group_no']}',
-              fontWeight: FontWeight.w600,
-            ),
-            const SizedBox(height: 5),
-            CustomText(
-              text: running['project'] as String,
-              fontWeight: FontWeight.bold,
-              fontSize: 18,
-              height: 1,
-            ),
-            const SizedBox(height: 10),
-            CustomText(
-              text: started == null
-                  ? '—'
-                  : formatClock(
-                      elapsedSec(
-                        startedAt: DateTime.parse(started),
-                        pausedSeconds:
-                            (running['paused_seconds'] as num?)?.toInt() ?? 0,
-                        frozenAt: active.pausedAt,
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF111111),
+                        borderRadius: BorderRadius.circular(25),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isPaused
+                                  ? Colors.orangeAccent
+                                  : const Color(0xFFDDF35C),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          CustomText(
+                            text: isPaused ? 'Paused' : 'Live',
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ],
                       ),
                     ),
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-            ),
-            CustomText(
-              text:
-                  '${running['supervisor']} · Started ${started == null ? '—' : formatTime(DateTime.parse(started))}',
-            ),
-          ] else ...[
-            const CustomText(
-              text: 'No group running',
-              fontWeight: FontWeight.w600,
-            ),
-            CustomText(
-              text: active.groupsRemaining > 0
-                  ? 'Open Live to start the next group'
-                  : 'All groups are finished. You can end the meeting.',
-            ),
-          ],
-          const SizedBox(height: 15),
-          Row(
-            spacing: 10,
-            children: [
-              Expanded(
-                child: Button(
-                  text: 'Open Live',
-                  height: 50,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  onTap: () => widget.onNavigate(kLive),
+                    const SizedBox(height: 10),
+                    Icon(
+                      liveExpanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      size: 32,
+                      color: Colors.black,
+                    ),
+                  ],
                 ),
+              ],
+            ),
+          ),
+
+          // ---------- EXPANDED CONTENT ----------
+          if (liveExpanded) ...[
+            const SizedBox(height: 20),
+            if (running != null) ...[
+              CustomText(
+                text: 'Group ${running['group_no']}',
+                fontWeight: FontWeight.w600,
               ),
-              Expanded(
-                child: Button(
-                  text: 'End meeting',
-                  fontWeight: FontWeight.bold,
-                  height: 50,
-                  fontSize: 14,
-                  enabled: !busy,
-                  onTap: () => changeMeeting(end: true),
-                ),
+              const SizedBox(height: 5),
+              CustomText(
+                text: running['project'] as String,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                height: 1,
               ),
-              Expanded(
-                child: Button(
-                  text: active.status == 'paused' ? 'Resume' : 'Pause',
-                  height: 50,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  color: Colors.white,
-                  enabled: !busy,
-                  onTap: () => changeMeeting(end: false),
-                ),
+              const SizedBox(height: 10),
+              CustomText(
+                text: started == null
+                    ? '—'
+                    : formatClock(
+                        elapsedSec(
+                          startedAt: DateTime.parse(started),
+                          pausedSeconds:
+                              (running['paused_seconds'] as num?)?.toInt() ??
+                              0,
+                          frozenAt: active.pausedAt,
+                        ),
+                      ),
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+              ),
+              CustomText(
+                text:
+                    '${running['supervisor']} · Started ${started == null ? '—' : formatTime(DateTime.parse(started))}',
+              ),
+            ] else ...[
+              const CustomText(
+                text: 'No group running',
+                fontWeight: FontWeight.w600,
+              ),
+              CustomText(
+                text: active.groupsRemaining > 0
+                    ? 'Open Live to start the next group'
+                    : 'All groups are finished. You can end the meeting.',
               ),
             ],
-          ),
+            const SizedBox(height: 15),
+            Row(
+              spacing: 10,
+              children: [
+                Expanded(
+                  child: Button(
+                    text: 'Open Live',
+                    height: 50,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    onTap: () => widget.onNavigate(kLive),
+                  ),
+                ),
+                Expanded(
+                  child: Button(
+                    text: 'End meeting',
+                    fontWeight: FontWeight.bold,
+                    height: 50,
+                    fontSize: 14,
+                    enabled: !busy,
+                    onTap: () => changeMeeting(end: true),
+                  ),
+                ),
+                Expanded(
+                  child: Button(
+                    text: active.status == 'paused' ? 'Resume' : 'Pause',
+                    height: 50,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: Colors.white,
+                    enabled: !busy,
+                    onTap: () => changeMeeting(end: false),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget upNextList() {
     final upcoming = groups.where((row) => row['status'] == 'upcoming').toList()
@@ -489,26 +548,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     counter('Total', active.groupsTotal),
                   ],
                 ),
-                // const SizedBox(height: 10),
-                // Row(
-                //   children: [
-                //     const Expanded(
-                //       child: CustomText(
-                //         text: 'Up next',
-                //         fontSize: 18,
-                //         fontWeight: FontWeight.bold,
-                //       ),
-                //     ),
-                //     TextButton(
-                //       onPressed: () => widget.onNavigate(kLive),
-                //       style: TextButton.styleFrom(
-                //         foregroundColor: Colors.black,
-                //       ),
-                //       child: const Text('See all'),
-                //     ),
-                //   ],
-                // ),
-                // upNextList(),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: CustomText(
+                        text: 'Up next',
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => widget.onNavigate(kLive),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.black,
+                      ),
+                      child: const Text('See all'),
+                    ),
+                  ],
+                ),
+                upNextList(),
               ],
             ],
           ),

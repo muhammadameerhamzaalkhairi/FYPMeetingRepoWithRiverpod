@@ -11,6 +11,7 @@ import 'package:livemeet/widgets/MeetingCard.dart';
 import 'package:livemeet/widgets/confirm_dialog.dart';
 import 'package:livemeet/widgets/filter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:livemeet/screens/edit_meeting_screen.dart';
 
 enum _MeetingAction { start, pauseResume, end, restart }
 
@@ -80,6 +81,13 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     await loadMeetings();
   }
 
+  Future<void> openEditor(Meeting meeting) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => EditMeetingScreen(meeting: meeting)),
+    );
+    if (changed == true && mounted) await loadMeetings();
+  }
+
   Future<void> act(Meeting meeting, _MeetingAction action) async {
     if (busy || isLoading || errorMessage.isNotEmpty) return;
     if (meetings.any((m) => m.isActive && m.id != meeting.id)) return;
@@ -96,7 +104,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
           context,
           title: switch (action) {
             _MeetingAction.start => 'Start meeting?',
-            _MeetingAction.restart => 'Restart meeting?',
+            _MeetingAction.restart => 'Restore meeting?',
             _ => 'End meeting?',
           },
           message: switch (action) {
@@ -200,6 +208,12 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                                     ? Colors.red
                                     : null,
                               ),
+
+                              if (errorMessage.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                Button(text: 'Retry', onTap: loadMeetings),
+                              ],
+
                               if (errorMessage.isEmpty && tab == 0) ...[
                                 const SizedBox(height: 10),
                                 Button(
@@ -213,7 +227,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                 );
               }
               final meeting = visible[index];
-              return MeetingCard(
+                            return MeetingCard(
                 key: ValueKey(meeting.id),
                 meeting: meeting,
                 locked: active != null && active.id != meeting.id,
@@ -224,6 +238,12 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                 onRestart: tab == 1
                     ? () => act(meeting, _MeetingAction.restart)
                     : null,
+                onEdit: meeting.status == 'upcoming'
+                    ? () => openEditor(meeting)
+                    : null,
+                onDelete: meeting.status == 'upcoming'
+                    ? () => deleteMeeting(meeting)
+                    : null,
               );
             },
           ),
@@ -231,6 +251,44 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       },
     );
   }
+
+
+  Future<void> deleteMeeting(Meeting meeting) async {
+    if (busy || isLoading) return;
+    setState(() => busy = true);
+    try {
+      final confirmed = await showConfirmDialog(
+        context,
+        title: 'Delete meeting?',
+        message:
+            '${meeting.title}\n${formatDate(meeting.meetingDate)}\n\nThis permanently deletes the meeting and all its groups.',
+        confirmText: 'Delete',
+      );
+      if (!mounted) return;
+      if (!confirmed) return;
+      widget.onBusyChanged(true);
+      await MeetingService.deleteMeeting(meeting.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Meeting deleted')));
+      await loadMeetings();
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+    } finally {
+      widget.onBusyChanged(false);
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {

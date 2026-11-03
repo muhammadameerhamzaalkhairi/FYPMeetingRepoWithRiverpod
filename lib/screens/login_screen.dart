@@ -16,6 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   TextEditingController email = TextEditingController();
   TextEditingController password = TextEditingController();
   bool isLoading = false;
+  bool obscurePassword = true;
 
   @override
   void dispose() {
@@ -41,7 +42,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     Image.asset('lib/assets/images/logo.png', height: 56),
                     SizedBox(width: 10),
                     CustomText(
-                      text: 'Live Meet',
+                      text: 'BIIT FYP Meetings',
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
                     ),
@@ -75,7 +76,13 @@ class _LoginScreenState extends State<LoginScreen> {
                 TextBox(
                   hintText: 'Password',
                   controller: password,
-                  obscureText: true,
+                  obscureText: obscurePassword,
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      obscurePassword ? Icons.visibility_off : Icons.visibility,
+                    ),
+                    onPressed: () => setState(() => obscurePassword = !obscurePassword),
+                  ),
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return 'Password is required';
