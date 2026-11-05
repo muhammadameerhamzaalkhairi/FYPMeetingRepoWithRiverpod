@@ -9,11 +9,12 @@ import 'package:livemeet/widgets/Button.dart';
 import 'package:livemeet/widgets/CustomText.dart';
 import 'package:livemeet/widgets/LiveDetailMeetingCard.dart';
 import 'package:livemeet/widgets/TextBox.dart';
+import 'package:livemeet/widgets/attendance_dialog.dart';
 import 'package:livemeet/widgets/confirm_dialog.dart';
 import 'package:livemeet/widgets/filter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-enum _GroupAction { start, end, pauseResume }
+enum _GroupAction { start, end, pause, resume, attendance }
 
 class LiveScreen extends StatefulWidget {
   final void Function(int) onNavigate;
@@ -32,11 +33,12 @@ class LiveScreen extends StatefulWidget {
 class _LiveScreenState extends State<LiveScreen> {
   static const sortRank = {
     'running': 0,
-    'upcoming': 1,
-    'done': 2,
-    'skipped': 3,
+    'paused': 1,
+    'upcoming': 2,
+    'done': 3,
+    'skipped': 4,
   };
-  static const filters = ['All', 'Running', 'Upcoming', 'Done'];
+  static const filters = ['All', 'Running', 'Upcoming', 'Paused', 'Done'];
   final search = TextEditingController();
   Meeting? meeting;
   Map<int, List<Map<String, dynamic>>> groups = {};
@@ -73,9 +75,14 @@ class _LiveScreenState extends State<LiveScreen> {
     super.dispose();
   }
 
-  Future<void> loadMeeting({bool selectRunningGroup = false}) async {
+  // silent = refresh the data without the loading spinner, so open cards and
+  // their timers are not rebuilt from scratch (used after Mark Attendance).
+  Future<void> loadMeeting({
+    bool selectRunningGroup = false,
+    bool silent = false,
+  }) async {
     setState(() {
-      isLoading = true;
+      if (!silent) isLoading = true;
       errorMessage = '';
     });
     try {
@@ -115,7 +122,7 @@ class _LiveScreenState extends State<LiveScreen> {
       if (!mounted) return;
       setState(() => errorMessage = 'Unable to load groups: $e');
     } finally {
-      if (mounted) setState(() => isLoading = false);
+      if (mounted && !silent) setState(() => isLoading = false);
     }
   }
 
@@ -127,79 +134,144 @@ class _LiveScreenState extends State<LiveScreen> {
   bool get hasRunningGroup =>
       groups.values.any((rows) => rows.first['status'] == 'running');
 
+  bool get ready => !busy && !isLoading && errorMessage.isEmpty;
+
+  // Group actions need the whole meeting to be running (not paused).
+  bool get meetingRunning => meeting?.status == 'running';
+
+  // Start only for upcoming groups when no group is running.
+  // Paused groups do not block starting another group.
   bool canStart(Map<String, dynamic> row) =>
-      !busy &&
-      !isLoading &&
-      errorMessage.isEmpty &&
-      meeting?.status == 'running' &&
+      ready &&
+      meetingRunning &&
       row['status'] == 'upcoming' &&
       !hasRunningGroup;
 
+  // End works for a running OR paused group.
   bool canEnd(Map<String, dynamic> row) =>
-      !busy &&
-      !isLoading &&
-      errorMessage.isEmpty &&
-      meeting?.status == 'running' &&
-      row['status'] == 'running';
+      ready &&
+      meetingRunning &&
+      (row['status'] == 'running' || row['status'] == 'paused');
 
+  // Pause: only a running group. Resume: only a paused group, and only
+  // while no other group is running.
   bool canPauseResume(Map<String, dynamic> row) =>
-      !busy &&
-      !isLoading &&
-      errorMessage.isEmpty &&
+      ready &&
+      meetingRunning &&
+      switch (row['status']) {
+        'running' => true,
+        'paused' => !hasRunningGroup,
+        _ => false,
+      };
+
+  // Late attendance for a running or paused group (timers are not touched).
+  bool canMarkAttendance(Map<String, dynamic> row) =>
+      ready &&
       meeting?.isActive == true &&
-      row['status'] == 'running';
+      (row['status'] == 'running' || row['status'] == 'paused');
 
   String? groupTimer(Map<String, dynamic> row) {
-    if (row['status'] != 'running' || row['started_at'] == null) return null;
-    return formatClock(
-      elapsedSec(
-        startedAt: DateTime.parse(row['started_at'] as String),
-        pausedSeconds: (row['paused_seconds'] as num?)?.toInt() ?? 0,
-        frozenAt: meeting?.pausedAt,
-      ),
-    );
+    final startedAt = row['started_at'] as String?;
+    if (startedAt == null) return null;
+    final pausedSeconds = (row['paused_seconds'] as num?)?.toInt() ?? 0;
+    switch (row['status']) {
+      case 'running':
+        return formatClock(
+          elapsedSec(
+            startedAt: DateTime.parse(startedAt),
+            pausedSeconds: pausedSeconds,
+            frozenAt: meeting?.pausedAt,
+          ),
+        );
+      case 'paused':
+        // A paused group shows its saved time, frozen.
+        final saved = (row['duration_sec'] as num?)?.toInt();
+        if (saved != null) return formatClock(saved);
+        final pausedAt = row['paused_at'] as String?;
+        return formatClock(
+          elapsedSec(
+            startedAt: DateTime.parse(startedAt),
+            pausedSeconds: pausedSeconds,
+            frozenAt: pausedAt == null ? null : DateTime.parse(pausedAt),
+          ),
+        );
+      default:
+        return null;
+    }
   }
 
-  Future<void> changeGroup(int number, _GroupAction action) async {
+  Future<void> changeGroup(
+    int number,
+    _GroupAction action, {
+    List<String> regs = const [],
+  }) async {
     final active = meeting;
-    final row = groups[number]?.first;
-    if (active == null || row == null) return;
+    final rows = groups[number];
+    final row = rows?.first;
+    if (active == null || rows == null || row == null) return;
     final allowed = switch (action) {
       _GroupAction.start => canStart(row),
       _GroupAction.end => canEnd(row),
-      _GroupAction.pauseResume => canPauseResume(row),
+      _GroupAction.pause || _GroupAction.resume => canPauseResume(row),
+      _GroupAction.attendance => canMarkAttendance(row) && regs.isNotEmpty,
     };
     if (!allowed) return;
     setState(() => busy = true);
     try {
-      if (action != _GroupAction.pauseResume) {
+      List<String>? present;
+      if (action == _GroupAction.start) {
+        // Replaces the plain confirm: operator checks who is present.
+        present = await showAttendanceDialog(
+          context,
+          number: number,
+          project: row['project'] as String,
+          students: rows,
+        );
+        if (!mounted) return;
+        if (present == null) return;
+      } else if (action == _GroupAction.end) {
         final confirmed = await showConfirmDialog(
           context,
-          title:
-              '${action == _GroupAction.start ? 'Start' : 'End'} group $number?',
-          message: action == _GroupAction.start
-              ? row['project'] as String
-              : 'Elapsed time: ${groupTimer(row) ?? '—'}',
+          title: 'End group $number?',
+          message: 'Elapsed time: ${groupTimer(row) ?? '—'}',
         );
         if (!mounted) return;
         if (!confirmed) return;
       }
       widget.onBusyChanged(true);
+      var marked = 0;
       switch (action) {
         case _GroupAction.start:
-          await MeetingService.startGroup(active.id, number);
+          await MeetingService.startGroup(active.id, number, present: present);
         case _GroupAction.end:
           await MeetingService.endGroup(active.id, number);
-        case _GroupAction.pauseResume:
-          if (active.status == 'paused') {
-            await MeetingService.resumeMeeting(active.id);
-          } else {
-            await MeetingService.pauseMeeting(active.id);
-          }
+        case _GroupAction.pause:
+          await MeetingService.pauseGroup(active.id, number);
+        case _GroupAction.resume:
+          await MeetingService.resumeGroup(active.id, number);
+        case _GroupAction.attendance:
+          marked = await MeetingService.markAttendance(
+            active.id,
+            number,
+            regs,
+          );
       }
       if (!mounted) return;
-      if (action == _GroupAction.start) setState(() => selectedGroup = number);
-      await loadMeeting();
+      if (action == _GroupAction.start || action == _GroupAction.resume) {
+        setState(() => selectedGroup = number);
+      }
+      if (action == _GroupAction.attendance) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              marked > 0
+                  ? '$marked student(s) marked present'
+                  : 'No new students were marked',
+            ),
+          ),
+        );
+      }
+      await loadMeeting(silent: action == _GroupAction.attendance);
       if (!mounted) return;
     } on PostgrestException catch (e) {
       if (!mounted) return;
@@ -258,8 +330,8 @@ class _LiveScreenState extends State<LiveScreen> {
       });
     }).toList();
     visible.sort((a, b) {
-      final rank = (sortRank[groups[a]!.first['status']] ?? 4).compareTo(
-        sortRank[groups[b]!.first['status']] ?? 4,
+      final rank = (sortRank[groups[a]!.first['status']] ?? 5).compareTo(
+        sortRank[groups[b]!.first['status']] ?? 5,
       );
       return rank != 0 ? rank : a.compareTo(b);
     });
@@ -356,11 +428,15 @@ class _LiveScreenState extends State<LiveScreen> {
               canStart: canStart(row),
               canEnd: canEnd(row),
               canPauseResume: canPauseResume(row),
-              isPaused: meeting!.status == 'paused',
+              canMarkAttendance: canMarkAttendance(row),
               onStart: () => changeGroup(number, _GroupAction.start),
               onEnd: () => changeGroup(number, _GroupAction.end),
-              onPauseResume: () =>
-                  changeGroup(number, _GroupAction.pauseResume),
+              onPauseResume: () => changeGroup(
+                number,
+                status == 'paused' ? _GroupAction.resume : _GroupAction.pause,
+              ),
+              onMarkAttendance: (regs) =>
+                  changeGroup(number, _GroupAction.attendance, regs: regs),
             );
           },
         ),

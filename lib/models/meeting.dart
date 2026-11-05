@@ -10,7 +10,9 @@ class Meeting {
       studentsTotal,
       groupsDone,
       groupsSkipped,
-      groupsRemaining;
+      groupsRemaining,
+      groupsPaused,
+      groupsIncomplete;
 
   const Meeting({
     required this.id,
@@ -27,6 +29,8 @@ class Meeting {
     required this.groupsDone,
     required this.groupsSkipped,
     required this.groupsRemaining,
+    required this.groupsPaused,
+    required this.groupsIncomplete,
   });
 
   bool get isActive => status == 'running' || status == 'paused';
@@ -50,6 +54,8 @@ class Meeting {
       groupsDone: (m['groups_done'] as num).toInt(),
       groupsSkipped: (m['groups_skipped'] as num).toInt(),
       groupsRemaining: (m['groups_remaining'] as num).toInt(),
+      groupsPaused: (m['groups_paused'] as num?)?.toInt() ?? 0,
+      groupsIncomplete: (m['groups_incomplete'] as num?)?.toInt() ?? 0,
     );
   }
 }

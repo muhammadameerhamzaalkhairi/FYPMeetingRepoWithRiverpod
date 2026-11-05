@@ -33,6 +33,8 @@ class _Student {
 
 int _nextUid = 0;
 
+// An upcoming group: the only kind that can be edited, added, deleted
+// or reordered.
 class _Group {
   final int uid;
   String project, supervisor;
@@ -53,6 +55,26 @@ class _Group {
   );
 }
 
+// A group with progress (running / paused / done / skipped). The DB never
+// changes these, so they are shown read-only and never sent back.
+class _Locked {
+  final int no, time;
+  final String status, project, supervisor;
+  final List<_Student> students;
+
+  _Locked({
+    required this.no,
+    required this.time,
+    required this.status,
+    required this.project,
+    required this.supervisor,
+    required this.students,
+  });
+
+  // Negative so it can never clash with an upcoming group's uid.
+  int get uid => -no;
+}
+
 class _Snap {
   final List<_Group> groups;
   final List<int> slots;
@@ -70,8 +92,9 @@ class EditMeetingScreen extends StatefulWidget {
 
 class _EditMeetingScreenState extends State<EditMeetingScreen> {
   final search = TextEditingController();
-  List<_Group> groups = [];
-  List<int> slots = []; // time (minutes) for each position
+  List<_Group> groups = []; // upcoming groups only (editable)
+  List<_Locked> locked = []; // groups with progress (read-only)
+  List<int> slots = []; // time (minutes) for each upcoming position
   int gap = 15;
   final List<_Snap> undoStack = [];
   final List<_Snap> redoStack = [];
@@ -106,8 +129,32 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
       if (!mounted) return;
       final map = <int, _Group>{};
       final times = <int, int>{};
+      final locks = <int, _Locked>{};
       for (final r in rows) {
         final no = (r['group_no'] as num).toInt();
+        final status = (r['status'] ?? 'upcoming').toString();
+        final student = _Student(
+          (r['student_name'] ?? '').toString(),
+          (r['reg_no'] ?? '').toString(),
+          (r['tech'] ?? '').toString(),
+        );
+        if (status != 'upcoming') {
+          locks
+              .putIfAbsent(
+                no,
+                () => _Locked(
+                  no: no,
+                  time: _toMin(r['meeting_time'] as String),
+                  status: status,
+                  project: (r['project'] ?? '').toString(),
+                  supervisor: (r['supervisor'] ?? '').toString(),
+                  students: [],
+                ),
+              )
+              .students
+              .add(student);
+          continue;
+        }
         final g = map.putIfAbsent(no, () {
           times[no] = _toMin(r['meeting_time'] as String);
           return _Group(
@@ -116,21 +163,20 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
             students: [],
           );
         });
-        g.students.add(
-          _Student(
-            (r['student_name'] ?? '').toString(),
-            (r['reg_no'] ?? '').toString(),
-            (r['tech'] ?? '').toString(),
-          ),
-        );
+        g.students.add(student);
       }
       final order = map.keys.toList()..sort();
+      // Gap is detected once, from the first two groups of the whole meeting.
+      final allTimes = {...times, for (final l in locks.values) l.no: l.time};
+      final allOrder = allTimes.keys.toList()..sort();
       setState(() {
         groups = [for (final k in order) map[k]!];
         slots = [for (final k in order) times[k]!];
-        // Gap is detected once, from the first two meetings.
-        gap = slots.length >= 2 && slots[1] - slots[0] > 0
-            ? slots[1] - slots[0]
+        locked = locks.values.toList()..sort((a, b) => a.no.compareTo(b.no));
+        gap =
+            allOrder.length >= 2 &&
+                allTimes[allOrder[1]]! - allTimes[allOrder[0]]! > 0
+            ? allTimes[allOrder[1]]! - allTimes[allOrder[0]]!
             : 15;
         undoStack.clear();
         redoStack.clear();
@@ -143,6 +189,20 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
       setState(() => errorMessage = 'Unable to load groups: $e');
     } finally {
       if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  // The number an upcoming group will have after saving: the DB gives
+  // upcoming groups the smallest group numbers not used by locked groups.
+  int numberOf(int index) {
+    final taken = {for (final l in locked) l.no};
+    var found = 0;
+    var candidate = 0;
+    while (true) {
+      candidate++;
+      if (taken.contains(candidate)) continue;
+      if (found == index) return candidate;
+      found++;
     }
   }
 
@@ -187,10 +247,14 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
     });
   }
 
+  // Students of locked groups count as taken too: the DB ignores incoming
+  // rows for them, so the same reg # can't be reused.
   Set<String> regsExcept(int? uid) => {
     for (final g in groups)
       if (g.uid != uid)
         for (final s in g.students) s.reg.trim().toLowerCase(),
+    for (final l in locked)
+      for (final s in l.students) s.reg.trim().toLowerCase(),
   };
 
   Future<_Group?> openEditor(_Group? group) {
@@ -224,7 +288,12 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
     setState(() {
       pushHistory();
       groups.add(result);
-      slots.add(slots.isEmpty ? 9 * 60 : slots.last + gap);
+      final lastSlot = slots.isNotEmpty
+          ? slots.last
+          : locked.isNotEmpty
+          ? locked.fold<int>(0, (a, l) => l.time > a ? l.time : a)
+          : null;
+      slots.add(lastSlot == null ? 9 * 60 : lastSlot + gap);
       expanded = result.uid;
     });
   }
@@ -233,7 +302,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
     if (busy) return;
     final confirmed = await showConfirmDialog(
       context,
-      title: 'Delete group ${index + 1}?',
+      title: 'Delete group ${numberOf(index)}?',
       message: groups[index].project,
       confirmText: 'Delete',
     );
@@ -249,20 +318,32 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
     context,
   ).showSnackBar(SnackBar(content: Text(text)));
 
+  // Result of save_meeting_schedule: {updated, added, removed} (student rows).
+  String saveSummary(Map<String, dynamic> result) {
+    int count(String key) => (result[key] as num?)?.toInt() ?? 0;
+    final parts = <String>[
+      if (count('updated') > 0) '${count('updated')} student(s) updated',
+      if (count('added') > 0) '${count('added')} student(s) added',
+      if (count('removed') > 0) '${count('removed')} student(s) removed',
+    ];
+    return parts.isEmpty ? 'Meeting updated' : parts.join(' · ');
+  }
+
   Future<void> save() async {
     if (busy || undoStack.isEmpty) return;
     if (groups.isEmpty) {
-      snack('Add at least one group');
+      snack('Add at least one upcoming group');
       return;
     }
     final messenger = ScaffoldMessenger.of(context);
     setState(() => busy = true);
     try {
+      // Only upcoming groups are sent; locked groups are never touched.
       final rows = <Map<String, dynamic>>[];
       for (var i = 0; i < groups.length; i++) {
         for (final s in groups[i].students) {
           rows.add({
-            'group_no': i + 1,
+            'group_no': numberOf(i),
             'meeting_time': _hhmm(slots[i]),
             'project': groups[i].project,
             'supervisor': groups[i].supervisor,
@@ -272,9 +353,9 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
           });
         }
       }
-      await MeetingService.saveSchedule(widget.meeting.id, rows);
+      final result = await MeetingService.saveSchedule(widget.meeting.id, rows);
       if (!mounted) return;
-      messenger.showSnackBar(const SnackBar(content: Text('Meeting updated')));
+      messenger.showSnackBar(SnackBar(content: Text(saveSummary(result))));
       Navigator.of(context).pop(true);
     } on PostgrestException catch (e) {
       if (mounted) snack(e.message);
@@ -315,17 +396,156 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
   bool matches(int index, List<String> words) {
     final g = groups[index];
     final fields = [
-      'group ${index + 1}',
+      'group ${numberOf(index)}',
       g.project,
       g.supervisor,
       for (final s in g.students) ...[s.name, s.reg, s.tech],
     ].map((e) => e.toLowerCase()).toList();
     return words.every((w) {
       if (RegExp(r'^\d+$').hasMatch(w) && w.length <= 3) {
-        return int.tryParse(w) == index + 1;
+        return int.tryParse(w) == numberOf(index);
       }
       return fields.any((f) => f.contains(w));
     });
+  }
+
+  bool matchesLocked(_Locked l, List<String> words) {
+    final fields = [
+      'group ${l.no}',
+      l.status,
+      l.project,
+      l.supervisor,
+      for (final s in l.students) ...[s.name, s.reg, s.tech],
+    ].map((e) => e.toLowerCase()).toList();
+    return words.every((w) {
+      if (RegExp(r'^\d+$').hasMatch(w) && w.length <= 3) {
+        return int.tryParse(w) == l.no;
+      }
+      return fields.any((f) => f.contains(w));
+    });
+  }
+
+  List<Widget> studentTiles(List<_Student> students) => [
+    for (final s in students)
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CustomText(text: s.name, fontWeight: FontWeight.bold),
+                  CustomText(text: s.reg, fontSize: 12),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD6E6F7),
+                  borderRadius: BorderRadius.circular(25),
+                ),
+                child: CustomText(text: s.tech, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+  ];
+
+  Widget lockedCard(_Locked l) {
+    final isOpen = expanded == l.uid;
+    return Container(
+      key: ValueKey('locked-${l.no}'),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.all(narrow ? 10 : 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Padding(
+                padding: EdgeInsets.only(right: narrow ? 4 : 8),
+                child: const Icon(Icons.lock_outline_rounded),
+              ),
+              CustomText(
+                text: '${l.no}',
+                fontSize: narrow ? 26 : 32,
+                fontWeight: FontWeight.bold,
+              ),
+              SizedBox(width: narrow ? 6 : 10),
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => expanded = isOpen ? null : l.uid),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CustomText(
+                        text: l.project,
+                        height: 1,
+                        fontSize: narrow ? 16 : 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      const SizedBox(height: 5),
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 5,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color.fromARGB(255, 219, 219, 219),
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                            child: CustomText(
+                              text:
+                                  '${l.status[0].toUpperCase()}${l.status.substring(1)}',
+                              fontSize: 12,
+                            ),
+                          ),
+                          CustomText(
+                            text: '${l.supervisor} - ${_label(l.time)}',
+                            fontSize: 12,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: () =>
+                    setState(() => expanded = isOpen ? null : l.uid),
+                icon: Icon(
+                  isOpen
+                      ? Icons.arrow_drop_up_rounded
+                      : Icons.arrow_drop_down_rounded,
+                ),
+                color: Colors.black,
+                visualDensity: narrow
+                    ? VisualDensity.compact
+                    : VisualDensity.standard,
+                padding: narrow ? const EdgeInsets.all(4) : null,
+                constraints: narrow ? const BoxConstraints() : null,
+              ),
+            ],
+          ),
+          if (isOpen) ...[
+            const SizedBox(height: 10),
+            ...studentTiles(l.students),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget groupCard(int index, {required bool draggable}) {
@@ -352,7 +572,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
                   ),
                 ),
               CustomText(
-                text: '${index + 1}',
+                text: '${numberOf(index)}',
                 fontSize: narrow ? 26 : 32,
                 fontWeight: FontWeight.bold,
               ),
@@ -411,38 +631,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
           ),
           if (isOpen) ...[
             const SizedBox(height: 10),
-            for (final s in g.students)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          CustomText(
-                            text: s.name,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          CustomText(text: s.reg, fontSize: 12),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFD6E6F7),
-                          borderRadius: BorderRadius.circular(25),
-                        ),
-                        child: CustomText(text: s.tech, fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            ...studentTiles(g.students),
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
@@ -476,7 +665,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
         ),
       );
     }
-    if (groups.isEmpty) {
+    if (groups.isEmpty && locked.isEmpty) {
       return const Center(
         child: CustomText(
           text: 'No groups. Tap + to add one.',
@@ -493,25 +682,47 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
         .toList();
 
     if (words.isNotEmpty) {
+      final visibleLocked = [
+        for (final l in locked)
+          if (matchesLocked(l, words)) l,
+      ];
       final visible = [
         for (var i = 0; i < groups.length; i++)
           if (matches(i, words)) i,
       ];
-      if (visible.isEmpty) {
+      if (visibleLocked.isEmpty && visible.isEmpty) {
         return const Center(
           child: CustomText(text: 'No groups match your search.'),
         );
       }
       return ListView.builder(
         padding: const EdgeInsets.only(bottom: 90),
-        itemCount: visible.length,
-        itemBuilder: (_, i) => groupCard(visible[i], draggable: false),
+        itemCount: visibleLocked.length + visible.length,
+        itemBuilder: (_, i) => i < visibleLocked.length
+            ? lockedCard(visibleLocked[i])
+            : groupCard(visible[i - visibleLocked.length], draggable: false),
       );
     }
 
     return ReorderableListView.builder(
       buildDefaultDragHandles: false,
       padding: const EdgeInsets.only(bottom: 90),
+      // Locked groups sit above the list: read-only, never reorderable.
+      header: locked.isEmpty
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(left: 6, bottom: 8),
+                  child: CustomText(
+                    text: 'Started or finished groups are locked',
+                    fontSize: 12,
+                  ),
+                ),
+                for (final l in locked) lockedCard(l),
+              ],
+            ),
       itemCount: groups.length,
       onReorder: onReorder,
       proxyDecorator: (child, _, _) =>
@@ -585,12 +796,14 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
                     icon: const Icon(Icons.redo_rounded),
                     color: const Color(0xFF111111),
                   ),
-                  IconButton(
-                    tooltip: 'Delete meeting',
-                    onPressed: busy ? null : deleteMeeting,
-                    icon: const Icon(Icons.delete_outline_rounded),
-                    color: Colors.red,
-                  ),
+                  // Deleting a whole meeting stays limited to upcoming ones.
+                  if (widget.meeting.status == 'upcoming')
+                    IconButton(
+                      tooltip: 'Delete meeting',
+                      onPressed: busy ? null : deleteMeeting,
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      color: Colors.red,
+                    ),
                 ],
               ),
               if (!keyboardVisible) ...[

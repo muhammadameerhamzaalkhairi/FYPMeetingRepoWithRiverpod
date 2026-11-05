@@ -96,10 +96,13 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     if (meetings.any((m) => m.isActive && m.id != meeting.id)) return;
     final allowed = switch (action) {
       _MeetingAction.start => meeting.status == 'upcoming',
-      _MeetingAction.restart => tab == 1 && meeting.status == 'done',
+      // Restart only for finished meetings that still have unfinished groups.
+      _MeetingAction.restart =>
+        tab == 1 && meeting.status == 'done' && meeting.groupsIncomplete > 0,
       _MeetingAction.pauseResume || _MeetingAction.end => meeting.isActive,
     };
     if (!allowed) return;
+    var restarted = false;
     setState(() => busy = true);
     try {
       if (action != _MeetingAction.pauseResume) {
@@ -107,17 +110,18 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
           context,
           title: switch (action) {
             _MeetingAction.start => 'Start meeting?',
-            _MeetingAction.restart => 'Restore meeting?',
+            _MeetingAction.restart => 'Restart meeting?',
             _ => 'End meeting?',
           },
           message: switch (action) {
             _MeetingAction.start =>
               '${meeting.title}\n${formatDate(meeting.meetingDate)}',
             _MeetingAction.restart =>
-              'All group progress for "${meeting.title}" will be reset. This meeting will go back to Coming meetings.',
+              '"${meeting.title}" will continue as a running meeting. All timings, attendance and progress are kept. Only groups that were not held will become upcoming again.',
             _ =>
               'The running group will be finished and groups that were not held will be marked as skipped.',
           },
+          confirmText: action == _MeetingAction.restart ? 'Restart' : 'Confirm',
         );
         if (!mounted) return;
         if (!confirmed) return;
@@ -136,11 +140,18 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
           await MeetingService.endMeeting(meeting.id);
         case _MeetingAction.restart:
           await MeetingService.restartMeeting(meeting.id);
+          restarted = true;
       }
       if (!mounted) return;
+      if (restarted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Meeting restarted')));
+      }
       await loadMeetings();
       if (!mounted) return;
     } on PostgrestException catch (e) {
+      restarted = false;
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -148,6 +159,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       await loadMeetings();
       if (!mounted) return;
     } catch (e) {
+      restarted = false;
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -158,6 +170,9 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       widget.onBusyChanged(false);
       if (mounted) setState(() => busy = false);
     }
+    // After the busy flag is cleared (MainScreen ignores navigation while
+    // busy), take the operator to Live to continue the restarted meeting.
+    if (restarted && mounted) widget.onNavigate(kLive);
   }
 
   List<Meeting> get visibleMeetings {
@@ -238,12 +253,15 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                 onStart: () => act(meeting, _MeetingAction.start),
                 onPauseResume: () => act(meeting, _MeetingAction.pauseResume),
                 onEnd: () => act(meeting, _MeetingAction.end),
-                onRestart: tab == 1
+                onRestart: tab == 1 && meeting.groupsIncomplete > 0
                     ? () => act(meeting, _MeetingAction.restart)
                     : null,
-                onEdit: meeting.status == 'upcoming'
+                // Settings can now be edited while the meeting is running or
+                // paused too (only finished meetings are locked).
+                onEdit: meeting.status != 'done'
                     ? () => openEditor(meeting)
                     : null,
+                // Deleting a whole meeting stays limited to upcoming ones.
                 onDelete: meeting.status == 'upcoming'
                     ? () => deleteMeeting(meeting)
                     : null,

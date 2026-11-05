@@ -76,9 +76,33 @@ class MeetingService {
     await _db.rpc('restart_meeting', params: {'p_id': id});
   }
 
-  static Future<void> startGroup(int meetingId, int groupNo) async {
+  /// Starts an upcoming group. [present] = reg numbers of present students;
+  /// null means everyone is present (the DB default).
+  static Future<void> startGroup(
+    int meetingId,
+    int groupNo, {
+    List<String>? present,
+  }) async {
     await _db.rpc(
       'group_start',
+      params: {
+        'p_meeting': meetingId,
+        'p_group': groupNo,
+        if (present != null) 'p_present': present,
+      },
+    );
+  }
+
+  static Future<void> pauseGroup(int meetingId, int groupNo) async {
+    await _db.rpc(
+      'group_pause',
+      params: {'p_meeting': meetingId, 'p_group': groupNo},
+    );
+  }
+
+  static Future<void> resumeGroup(int meetingId, int groupNo) async {
+    await _db.rpc(
+      'group_resume',
       params: {'p_meeting': meetingId, 'p_group': groupNo},
     );
   }
@@ -90,17 +114,36 @@ class MeetingService {
     );
   }
 
+  /// Marks newly present students of a running/paused group.
+  /// Returns how many students were newly marked.
+  static Future<int> markAttendance(
+    int meetingId,
+    int groupNo,
+    List<String> present,
+  ) async {
+    final result = await _db.rpc(
+      'mark_attendance',
+      params: {
+        'p_meeting': meetingId,
+        'p_group': groupNo,
+        'p_present': present,
+      },
+    );
+    return (result as num?)?.toInt() ?? 0;
+  }
 
-
-
-    static Future<void> saveSchedule(
+  /// Returns {updated, added, removed}.
+  static Future<Map<String, dynamic>> saveSchedule(
     int meetingId,
     List<Map<String, dynamic>> rows,
   ) async {
-    await _db.rpc(
+    final result = await _db.rpc(
       'save_meeting_schedule',
       params: {'p_id': meetingId, 'p_rows': rows},
     );
+    return result is Map
+        ? Map<String, dynamic>.from(result)
+        : <String, dynamic>{};
   }
 
   static Future<void> deleteMeeting(int id) async {

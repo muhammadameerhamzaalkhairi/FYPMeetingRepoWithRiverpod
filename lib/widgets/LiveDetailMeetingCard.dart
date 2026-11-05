@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:livemeet/widgets/Button.dart';
 import 'package:livemeet/widgets/CustomText.dart';
 
-class Livedetailmeetingcard extends StatelessWidget {
+class Livedetailmeetingcard extends StatefulWidget {
   final int number;
   final String title;
   final String status;
@@ -23,7 +23,8 @@ class Livedetailmeetingcard extends StatelessWidget {
   final bool canStart;
   final bool canEnd;
   final bool canPauseResume;
-  final bool isPaused;
+  final bool canMarkAttendance;
+  final ValueChanged<List<String>>? onMarkAttendance;
   final List<Map<String, dynamic>> students;
 
   const Livedetailmeetingcard({
@@ -45,17 +46,172 @@ class Livedetailmeetingcard extends StatelessWidget {
     this.canStart = false,
     this.canEnd = false,
     this.canPauseResume = false,
-    this.isPaused = false,
+    this.canMarkAttendance = false,
+    this.onMarkAttendance,
     this.students = const [],
   });
 
   @override
+  State<Livedetailmeetingcard> createState() => _LivedetailmeetingcardState();
+}
+
+class _LivedetailmeetingcardState extends State<Livedetailmeetingcard> {
+  // reg numbers ticked by the operator but not yet saved
+  final Set<String> pending = {};
+
+  String get normalizedStatus => widget.status.toLowerCase();
+
+  // attendance can be changed only while the group is running or paused
+  bool get attendanceOpen =>
+      normalizedStatus == 'running' || normalizedStatus == 'paused';
+
+  static bool isPresent(Map<String, dynamic> student) =>
+      student['is_present'] == true;
+
+  static String regOf(Map<String, dynamic> student) =>
+      student['reg_no']?.toString() ?? '';
+
+  @override
+  void didUpdateWidget(covariant Livedetailmeetingcard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!attendanceOpen) {
+      pending.clear();
+      return;
+    }
+    // After a refresh, drop ticks that are now saved (present) or gone.
+    final absent = {
+      for (final s in widget.students)
+        if (!isPresent(s)) regOf(s),
+    };
+    pending.removeWhere((reg) => !absent.contains(reg));
+  }
+
+  void toggle(String reg, bool value) {
+    setState(() {
+      if (value) {
+        pending.add(reg);
+      } else {
+        pending.remove(reg);
+      }
+    });
+  }
+
+  void markAttendance() {
+    if (!widget.canMarkAttendance || pending.isEmpty) return;
+    widget.onMarkAttendance?.call(pending.toList());
+  }
+
+  Widget markButton({required bool narrow}) {
+    final enabled = widget.canMarkAttendance && pending.isNotEmpty;
+    return Tooltip(
+      message: 'Mark attendance',
+      child: GestureDetector(
+        onTap: enabled ? markAttendance : null,
+        child: Opacity(
+          opacity: enabled ? 1 : 0.4,
+          child: Container(
+            width: narrow ? 52 : 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(50),
+              border: Border.all(),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.how_to_reg_rounded, size: 22),
+                if (pending.isNotEmpty) ...[
+                  const SizedBox(width: 2),
+                  CustomText(
+                    text: '${pending.length}',
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget studentRow(Map<String, dynamic> student) {
+    final reg = regOf(student);
+    final present = isPresent(student);
+    final showCheckbox = attendanceOpen;
+    final showResult = normalizedStatus == 'done';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          if (showCheckbox) ...[
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: Checkbox(
+                value: present || pending.contains(reg),
+                activeColor: Colors.black,
+                checkColor: Colors.white,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+                // Present students are locked. Absent ones can be ticked
+                // late, as long as no other action is running.
+                onChanged: present || !widget.canMarkAttendance
+                    ? null
+                    : (value) => toggle(reg, value ?? false),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CustomText(
+                  text: student['student_name']?.toString() ?? '',
+                  fontWeight: FontWeight.bold,
+                ),
+                CustomText(text: reg, fontSize: 12),
+                if (showResult)
+                  CustomText(
+                    text: present ? 'Present' : 'Absent',
+                    fontSize: 12,
+                    color: present ? null : Colors.red,
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFD6E6F7),
+                borderRadius: BorderRadius.circular(25),
+              ),
+              child: CustomText(
+                text: student['tech']?.toString() ?? '',
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final normalizedStatus = status.toLowerCase();
-    final timing = normalizedStatus == 'running'
-        ? timerText
+    // Running shows the live timer, paused shows the saved (frozen) time,
+    // done shows the total.
+    final timing = normalizedStatus == 'running' || normalizedStatus == 'paused'
+        ? widget.timerText
         : normalizedStatus == 'done'
-        ? totalText
+        ? widget.totalText
         : null;
 
     // Responsive: tighter sizes on narrow phones so the title gets more room.
@@ -63,14 +219,16 @@ class Livedetailmeetingcard extends StatelessWidget {
     final pad = narrow ? 10.0 : 12.0;
 
     return GestureDetector(
-      onTap: onTap,
+      onTap: widget.onTap,
 
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         width: double.infinity,
         margin: const EdgeInsets.only(bottom: 10),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFDDF35C) : const Color(0xFFFFFFFF),
+          color: widget.isSelected
+              ? const Color(0xFFDDF35C)
+              : const Color(0xFFFFFFFF),
           borderRadius: BorderRadius.circular(20),
         ),
 
@@ -90,7 +248,7 @@ class Livedetailmeetingcard extends StatelessWidget {
                       color: Colors.white,
                       border: Border.all(),
                     ),
-                    child: isSelected
+                    child: widget.isSelected
                         ? Container(
                             width: 25,
                             height: 25,
@@ -103,7 +261,7 @@ class Livedetailmeetingcard extends StatelessWidget {
                   ),
                   SizedBox(width: narrow ? 6 : 10),
                   CustomText(
-                    text: number.toString(),
+                    text: widget.number.toString(),
                     fontSize: narrow ? 26 : 32,
                     fontWeight: FontWeight.bold,
                   ),
@@ -114,7 +272,7 @@ class Livedetailmeetingcard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         CustomText(
-                          text: title,
+                          text: widget.title,
                           height: 1,
                           fontSize: narrow ? 16 : 18,
                           fontWeight: FontWeight.bold,
@@ -131,11 +289,14 @@ class Livedetailmeetingcard extends StatelessWidget {
                                 color: const Color.fromARGB(255, 219, 219, 219),
                                 borderRadius: BorderRadius.circular(25),
                               ),
-                              child: CustomText(text: status, fontSize: 12),
+                              child: CustomText(
+                                text: widget.status,
+                                fontSize: 12,
+                              ),
                             ),
 
                             CustomText(
-                              text: '$supervisor - $time',
+                              text: '${widget.supervisor} - ${widget.time}',
                               fontSize: 12,
                             ),
                             if (timing != null)
@@ -162,8 +323,8 @@ class Livedetailmeetingcard extends StatelessWidget {
                     // FIX: onPressed was null, so the arrow was disabled
                     child: IconButton(
                       padding: narrow ? EdgeInsets.zero : null,
-                      onPressed: onExpand,
-                      icon: isExpanded
+                      onPressed: widget.onExpand,
+                      icon: widget.isExpanded
                           ? const Icon(
                               Icons.arrow_drop_up_rounded,
                               color: Colors.black,
@@ -177,86 +338,50 @@ class Livedetailmeetingcard extends StatelessWidget {
                 ],
               ),
 
-              if (isExpanded) ...[
+              if (widget.isExpanded) ...[
                 const SizedBox(height: 10),
                 ListView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: students.length,
-                  itemBuilder: (context, index) {
-                    final student = students[index];
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            flex: 2,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                CustomText(
-                                  text:
-                                      student['student_name']?.toString() ?? '',
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                CustomText(
-                                  text: student['reg_no']?.toString() ?? '',
-                                  fontSize: 12,
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Flexible(
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFD6E6F7),
-                                borderRadius: BorderRadius.circular(25),
-                              ),
-                              child: CustomText(
-                                text: student['tech']?.toString() ?? '',
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+                  itemCount: widget.students.length,
+                  itemBuilder: (context, index) =>
+                      studentRow(widget.students[index]),
                 ),
               ],
 
               const SizedBox(height: 10),
 
-              isSelected &&
+              widget.isSelected &&
                       normalizedStatus != 'done' &&
                       normalizedStatus != 'skipped'
                   ? Row(
                       spacing: narrow ? 6 : 10,
                       children: [
+                        if (attendanceOpen) markButton(narrow: narrow),
                         Expanded(
                           child: Button(
                             text: 'End',
                             fontSize: narrow ? 14 : 15,
-                            enabled: canEnd,
-                            onTap: onEnd,
+                            enabled: widget.canEnd,
+                            onTap: widget.onEnd,
                           ),
                         ),
                         Expanded(
                           child: Button(
                             text: 'Start',
                             fontSize: narrow ? 14 : 15,
-                            enabled: canStart,
-                            onTap: onStart,
+                            enabled: widget.canStart,
+                            onTap: widget.onStart,
                           ),
                         ),
                         Expanded(
                           child: Button(
-                            text: isPaused ? 'Resume' : 'Pause',
+                            text: normalizedStatus == 'paused'
+                                ? 'Resume'
+                                : 'Pause',
                             fontSize: narrow ? 14 : 15,
-                            enabled: canPauseResume,
-                            onTap: onPauseResume,
+                            enabled: widget.canPauseResume,
+                            onTap: widget.onPauseResume,
                           ),
                         ),
                       ],

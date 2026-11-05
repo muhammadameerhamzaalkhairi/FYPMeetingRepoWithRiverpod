@@ -90,6 +90,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, dynamic>? get runningGroup =>
       groups.where((row) => row['status'] == 'running').firstOrNull;
 
+  int get pausedGroupCount =>
+      groups.where((row) => row['status'] == 'paused').length;
+
   Future<void> logout() async {
     if (busy) return;
     setState(() => busy = true);
@@ -217,6 +220,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final started = running?['started_at'] as String?;
     final meetingStarted = active.startedAt;
     final isPaused = active.status == 'paused';
+    final pausedGroups = pausedGroupCount;
 
     return AnimatedSize(
       duration: const Duration(milliseconds: 250),
@@ -358,13 +362,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   text:
                       '${running['supervisor']} · Started ${started == null ? '—' : formatTime(DateTime.parse(started))}',
                 ),
+                if (pausedGroups > 0)
+                  CustomText(
+                    text: '$pausedGroups group(s) paused',
+                    fontSize: 12,
+                  ),
               ] else ...[
                 const CustomText(
                   text: 'No group running',
                   fontWeight: FontWeight.w600,
                 ),
                 CustomText(
-                  text: active.groupsRemaining > 0
+                  text: pausedGroups > 0
+                      ? '$pausedGroups group(s) paused. Open Live to resume one or start another group.'
+                      : active.groupsRemaining > 0
                       ? 'Open Live to start the next group'
                       : 'All groups are finished. You can end the meeting.',
                 ),
@@ -382,27 +393,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       onTap: () => widget.onNavigate(kLive),
                     ),
                   ),
-                  Expanded(
-                    child: Button(
-                      text: 'End meeting',
-                      fontWeight: FontWeight.bold,
-                      height: 50,
-                      fontSize: narrow ? 13 : 14,
-                      enabled: !busy,
-                      onTap: () => widget.onNavigate(kMeetings),
-                    ),
-                  ),
-                  Expanded(
-                    child: Button(
-                      text: active.status == 'paused' ? 'Resume' : 'Pause',
-                      height: 50,
-                      fontWeight: FontWeight.bold,
-                      fontSize: narrow ? 13 : 14,
-                      color: Colors.white,
-                      enabled: !busy,
-                      onTap: () => changeMeeting(end: false),
-                    ),
-                  ),
+                  // Expanded(
+                  //   child: Button(
+                  //     text: 'End meeting',
+                  //     fontWeight: FontWeight.bold,
+                  //     height: 50,
+                  //     fontSize: narrow ? 13 : 14,
+                  //     enabled: !busy,
+                  //     onTap: () => widget.onNavigate(kMeetings),
+                  //   ),
+                  // ),
+                  // Expanded(
+                  //   child: Button(
+                  //     text: active.status == 'paused' ? 'Resume' : 'Pause',
+                  //     height: 50,
+                  //     fontWeight: FontWeight.bold,
+                  //     fontSize: narrow ? 13 : 14,
+                  //     color: Colors.white,
+                  //     enabled: !busy,
+                  //     onTap: () => changeMeeting(end: false),
+                  //   ),
+                  // ),
                 ],
               ),
             ],
@@ -413,8 +424,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget upNextList() {
-    final upcoming = groups.where((row) => row['status'] == 'upcoming').toList()
-      ..sort((a, b) => (a['group_no'] as num).compareTo(b['group_no'] as num));
+    // Paused groups are waiting to be resumed, so they are listed too
+    // (first), followed by the upcoming ones.
+    final upcoming =
+        groups
+            .where(
+              (row) => row['status'] == 'upcoming' || row['status'] == 'paused',
+            )
+            .toList()
+          ..sort((a, b) {
+            final aPaused = a['status'] == 'paused';
+            final bPaused = b['status'] == 'paused';
+            if (aPaused != bPaused) return aPaused ? -1 : 1;
+            return (a['group_no'] as num).compareTo(b['group_no'] as num);
+          });
     // The original dashboard has no number tiles; use the spec's pastel palette.
     // const colors = [
     //   Color(0xFFD6E6F7),
@@ -429,6 +452,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       itemCount: upcoming.length > 2 ? 2 : upcoming.length,
       itemBuilder: (context, index) {
         final row = upcoming[index];
+        final isPausedGroup = row['status'] == 'paused';
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
           padding: EdgeInsets.all(narrow ? 10 : 12),
@@ -475,7 +499,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   color: const Color.fromARGB(255, 219, 219, 219),
                   borderRadius: BorderRadius.circular(25),
                 ),
-                child: const CustomText(text: 'Upcoming', fontSize: 12),
+                child: CustomText(
+                  text: isPausedGroup ? 'Paused' : 'Upcoming',
+                  fontSize: 12,
+                ),
               ),
             ],
           ),

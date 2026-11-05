@@ -198,9 +198,9 @@ class _ImportScreenState extends State<ImportScreen> {
         alreadyAdded = existingCount == days;
         hasExisting = existingCount > 0;
         alreadyAddedText = alreadyAdded
-            ? 'Already added. Importing this file will update the previous data with the changes in this file.'
+            ? 'Already added. Importing this file will update the upcoming groups of these meetings. Groups that already started or finished are kept as they are, and finished meetings are not changed.'
             : existingCount > 0
-            ? '$existingCount of $days days already added. Those will be updated, the rest will be imported.'
+            ? '$existingCount of $days days already added. Their upcoming groups will be updated (started or finished groups are kept as they are), the rest will be imported.'
             : '';
         // ab already-added hone par bhi import (update) allowed hai
         canImport = true;
@@ -235,7 +235,7 @@ class _ImportScreenState extends State<ImportScreen> {
           context,
           title: 'Update existing data?',
           message:
-              'This file will update the already added meeting data for "$meetingTitle". Students no longer in the file will be removed from upcoming meetings.',
+              'This file will update the already added meeting data for "$meetingTitle". Groups that already started or finished are kept as they are. Students no longer in the file will be removed from upcoming groups.',
           confirmText: 'Update',
         );
         if (!mounted) return;
@@ -258,18 +258,19 @@ class _ImportScreenState extends State<ImportScreen> {
         }
         final updated = result.where((r) => r['state'] == 'updated').length;
         final added = result.where((r) => r['state'] == 'added').length;
+        // 'locked' now means the meeting is finished.
         final locked = result.where((r) => r['state'] == 'locked').length;
 
         if (updated + added == 0) {
           throw const FormatException(
-            'These meetings have already started or finished, so they cannot be updated.',
+            'These meetings are already finished, so they cannot be updated.',
           );
         }
 
         final parts = <String>[
           if (updated > 0) '$updated meeting(s) updated',
           if (added > 0) '$added meeting(s) added',
-          if (locked > 0) '$locked skipped (already started/finished)',
+          if (locked > 0) '$locked finished meeting(s) not changed',
         ];
         ScaffoldMessenger.of(
           context,

@@ -145,6 +145,11 @@ class MeetingCard extends StatelessWidget {
                 fontSize: narrow ? 24 : 28,
                 fontWeight: FontWeight.bold,
               ),
+              if (meeting.groupsPaused > 0)
+                CustomText(
+                  text: '${meeting.groupsPaused} group(s) paused',
+                  fontSize: 12,
+                ),
             ],
             if (meeting.status == 'done') ...[
               CustomText(
@@ -158,12 +163,14 @@ class MeetingCard extends StatelessWidget {
               const SizedBox(height: 5),
               CustomText(
                 text:
-                    'Done ${meeting.groupsDone} · Skipped ${meeting.groupsSkipped}',
+                    'Done ${meeting.groupsDone} · Skipped ${meeting.groupsSkipped}'
+                    '${meeting.groupsPaused > 0 ? ' · Paused ${meeting.groupsPaused}' : ''}',
               ),
-              if (onRestart != null) ...[
+              // Restart is offered only when some group is not finished.
+              if (onRestart != null && meeting.groupsIncomplete > 0) ...[
                 const SizedBox(height: 10),
                 Button(
-                  text: 'Restore meeting',
+                  text: 'Restart',
                   height: 48,
                   fontSize: narrow ? 14 : 15,
                   enabled: enabled,
