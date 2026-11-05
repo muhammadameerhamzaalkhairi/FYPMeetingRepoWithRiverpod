@@ -23,8 +23,9 @@ class Livedetailmeetingcard extends StatefulWidget {
   final bool canStart;
   final bool canEnd;
   final bool canPauseResume;
-  final bool canMarkAttendance;
-  final ValueChanged<List<String>>? onMarkAttendance;
+  final bool canEditAttendance;
+  // Receives the FULL list of reg numbers that should be present.
+  final ValueChanged<List<String>>? onSaveAttendance;
   final List<Map<String, dynamic>> students;
 
   const Livedetailmeetingcard({
@@ -46,8 +47,8 @@ class Livedetailmeetingcard extends StatefulWidget {
     this.canStart = false,
     this.canEnd = false,
     this.canPauseResume = false,
-    this.canMarkAttendance = false,
-    this.onMarkAttendance,
+    this.canEditAttendance = false,
+    this.onSaveAttendance,
     this.students = const [],
   });
 
@@ -56,57 +57,75 @@ class Livedetailmeetingcard extends StatefulWidget {
 }
 
 class _LivedetailmeetingcardState extends State<Livedetailmeetingcard> {
-  // reg numbers ticked by the operator but not yet saved
-  final Set<String> pending = {};
+  // What the operator currently sees ticked (may differ from the DB until saved).
+  late Set<String> checked;
 
   String get normalizedStatus => widget.status.toLowerCase();
 
-  // attendance can be changed only while the group is running or paused
+  // Attendance can be edited for any group that has started (also after it
+  // is done). Checkboxes are never locked by an earlier mark.
   bool get attendanceOpen =>
-      normalizedStatus == 'running' || normalizedStatus == 'paused';
-
-  static bool isPresent(Map<String, dynamic> student) =>
-      student['is_present'] == true;
+      normalizedStatus == 'running' ||
+      normalizedStatus == 'paused' ||
+      normalizedStatus == 'done';
 
   static String regOf(Map<String, dynamic> student) =>
       student['reg_no']?.toString() ?? '';
 
+  static Set<String> savedPresent(List<Map<String, dynamic>> students) => {
+    for (final s in students)
+      if (s['is_present'] == true) regOf(s),
+  };
+
+  Set<String> get saved => savedPresent(widget.students);
+
+  // number of students whose tick differs from what is saved
+  int get changes => checked.difference(saved).length +
+      saved.difference(checked).length;
+
+  bool get dirty => changes > 0;
+
+  @override
+  void initState() {
+    super.initState();
+    checked = saved;
+  }
+
   @override
   void didUpdateWidget(covariant Livedetailmeetingcard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!attendanceOpen) {
-      pending.clear();
-      return;
+    final before = savedPresent(oldWidget.students);
+    final after = saved;
+    // Saved attendance changed (after Save or a refresh): show the DB state.
+    // Otherwise keep the operator's unsaved ticks.
+    if (before.length != after.length || !before.containsAll(after)) {
+      checked = after;
     }
-    // After a refresh, drop ticks that are now saved (present) or gone.
-    final absent = {
-      for (final s in widget.students)
-        if (!isPresent(s)) regOf(s),
-    };
-    pending.removeWhere((reg) => !absent.contains(reg));
+    if (!attendanceOpen) checked = after;
   }
 
   void toggle(String reg, bool value) {
     setState(() {
       if (value) {
-        pending.add(reg);
+        checked.add(reg);
       } else {
-        pending.remove(reg);
+        checked.remove(reg);
       }
     });
   }
 
-  void markAttendance() {
-    if (!widget.canMarkAttendance || pending.isEmpty) return;
-    widget.onMarkAttendance?.call(pending.toList());
+  void saveAttendance() {
+    if (!widget.canEditAttendance || !dirty) return;
+    widget.onSaveAttendance?.call(checked.toList());
   }
 
-  Widget markButton({required bool narrow}) {
-    final enabled = widget.canMarkAttendance && pending.isNotEmpty;
+  // compact button, left of End / Start / Pause
+  Widget saveIconButton({required bool narrow}) {
+    final enabled = widget.canEditAttendance && dirty;
     return Tooltip(
-      message: 'Mark attendance',
+      message: 'Save attendance',
       child: GestureDetector(
-        onTap: enabled ? markAttendance : null,
+        onTap: enabled ? saveAttendance : null,
         child: Opacity(
           opacity: enabled ? 1 : 0.4,
           child: Container(
@@ -121,10 +140,10 @@ class _LivedetailmeetingcardState extends State<Livedetailmeetingcard> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Icon(Icons.how_to_reg_rounded, size: 22),
-                if (pending.isNotEmpty) ...[
+                if (dirty) ...[
                   const SizedBox(width: 2),
                   CustomText(
-                    text: '${pending.length}',
+                    text: '$changes',
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
                   ),
@@ -139,29 +158,26 @@ class _LivedetailmeetingcardState extends State<Livedetailmeetingcard> {
 
   Widget studentRow(Map<String, dynamic> student) {
     final reg = regOf(student);
-    final present = isPresent(student);
-    final showCheckbox = attendanceOpen;
-    final showResult = normalizedStatus == 'done';
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          if (showCheckbox) ...[
+          if (attendanceOpen) ...[
             SizedBox(
               width: 24,
               height: 24,
               child: Checkbox(
-                value: present || pending.contains(reg),
+                value: checked.contains(reg),
                 activeColor: Colors.black,
                 checkColor: Colors.white,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 visualDensity: VisualDensity.compact,
-                // Present students are locked. Absent ones can be ticked
-                // late, as long as no other action is running.
-                onChanged: present || !widget.canMarkAttendance
-                    ? null
-                    : (value) => toggle(reg, value ?? false),
+                // Always editable (tick or untick), as long as no other
+                // action is running.
+                onChanged: widget.canEditAttendance
+                    ? (value) => toggle(reg, value ?? false)
+                    : null,
               ),
             ),
             const SizedBox(width: 8),
@@ -176,12 +192,6 @@ class _LivedetailmeetingcardState extends State<Livedetailmeetingcard> {
                   fontWeight: FontWeight.bold,
                 ),
                 CustomText(text: reg, fontSize: 12),
-                if (showResult)
-                  CustomText(
-                    text: present ? 'Present' : 'Absent',
-                    fontSize: 12,
-                    color: present ? null : Colors.red,
-                  ),
               ],
             ),
           ),
@@ -217,6 +227,18 @@ class _LivedetailmeetingcardState extends State<Livedetailmeetingcard> {
     // Responsive: tighter sizes on narrow phones so the title gets more room.
     final narrow = MediaQuery.sizeOf(context).width < 360;
     final pad = narrow ? 10.0 : 12.0;
+
+    final showActionRow =
+        widget.isSelected &&
+        normalizedStatus != 'done' &&
+        normalizedStatus != 'skipped';
+    // Done groups (and cards that are not selected) have no action row, so
+    // the save button appears under the student list as soon as a tick changes.
+    final showInlineSave =
+        widget.isExpanded &&
+        attendanceOpen &&
+        dirty &&
+        !(showActionRow && normalizedStatus != 'done');
 
     return GestureDetector(
       onTap: widget.onTap,
@@ -349,15 +371,24 @@ class _LivedetailmeetingcardState extends State<Livedetailmeetingcard> {
                 ),
               ],
 
+              if (showInlineSave) ...[
+                const SizedBox(height: 10),
+                Button(
+                  text: 'Save attendance ($changes)',
+                  height: 44,
+                  fontSize: narrow ? 13 : 14,
+                  enabled: widget.canEditAttendance,
+                  onTap: saveAttendance,
+                ),
+              ],
+
               const SizedBox(height: 10),
 
-              widget.isSelected &&
-                      normalizedStatus != 'done' &&
-                      normalizedStatus != 'skipped'
+              showActionRow
                   ? Row(
                       spacing: narrow ? 6 : 10,
                       children: [
-                        if (attendanceOpen) markButton(narrow: narrow),
+                        if (attendanceOpen) saveIconButton(narrow: narrow),
                         Expanded(
                           child: Button(
                             text: 'End',

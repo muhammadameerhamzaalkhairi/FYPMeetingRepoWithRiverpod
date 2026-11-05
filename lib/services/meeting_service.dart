@@ -114,8 +114,8 @@ class MeetingService {
     );
   }
 
-  /// Marks newly present students of a running/paused group.
-  /// Returns how many students were newly marked.
+  /// Old behaviour: only ADDS newly present students (never unmarks).
+  /// Kept for compatibility; the Live screen now uses [setAttendance].
   static Future<int> markAttendance(
     int meetingId,
     int groupNo,
@@ -123,6 +123,25 @@ class MeetingService {
   ) async {
     final result = await _db.rpc(
       'mark_attendance',
+      params: {
+        'p_meeting': meetingId,
+        'p_group': groupNo,
+        'p_present': present,
+      },
+    );
+    return (result as num?)?.toInt() ?? 0;
+  }
+
+  /// Sets attendance of a started group to EXACTLY [present] (reg numbers):
+  /// listed students become present, all others in the group become absent.
+  /// Returns how many students changed.
+  static Future<int> setAttendance(
+    int meetingId,
+    int groupNo,
+    List<String> present,
+  ) async {
+    final result = await _db.rpc(
+      'set_attendance',
       params: {
         'p_meeting': meetingId,
         'p_group': groupNo,

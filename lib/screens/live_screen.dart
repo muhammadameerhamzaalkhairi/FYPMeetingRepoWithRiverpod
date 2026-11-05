@@ -76,7 +76,7 @@ class _LiveScreenState extends State<LiveScreen> {
   }
 
   // silent = refresh the data without the loading spinner, so open cards and
-  // their timers are not rebuilt from scratch (used after Mark Attendance).
+  // their timers are not rebuilt from scratch (used after saving attendance).
   Future<void> loadMeeting({
     bool selectRunningGroup = false,
     bool silent = false,
@@ -164,11 +164,15 @@ class _LiveScreenState extends State<LiveScreen> {
         _ => false,
       };
 
-  // Late attendance for a running or paused group (timers are not touched).
-  bool canMarkAttendance(Map<String, dynamic> row) =>
+  // Attendance can be edited (tick AND untick) for every group that has
+  // started: running, paused or done. It never touches timers, and it also
+  // works while the whole meeting is paused.
+  bool canEditAttendance(Map<String, dynamic> row) =>
       ready &&
       meeting?.isActive == true &&
-      (row['status'] == 'running' || row['status'] == 'paused');
+      (row['status'] == 'running' ||
+          row['status'] == 'paused' ||
+          row['status'] == 'done');
 
   String? groupTimer(Map<String, dynamic> row) {
     final startedAt = row['started_at'] as String?;
@@ -200,6 +204,8 @@ class _LiveScreenState extends State<LiveScreen> {
     }
   }
 
+  // [regs] is used only by the attendance action: the FULL list of students
+  // that should be present (may be empty = everyone absent).
   Future<void> changeGroup(
     int number,
     _GroupAction action, {
@@ -213,7 +219,7 @@ class _LiveScreenState extends State<LiveScreen> {
       _GroupAction.start => canStart(row),
       _GroupAction.end => canEnd(row),
       _GroupAction.pause || _GroupAction.resume => canPauseResume(row),
-      _GroupAction.attendance => canMarkAttendance(row) && regs.isNotEmpty,
+      _GroupAction.attendance => canEditAttendance(row),
     };
     if (!allowed) return;
     setState(() => busy = true);
@@ -239,7 +245,7 @@ class _LiveScreenState extends State<LiveScreen> {
         if (!confirmed) return;
       }
       widget.onBusyChanged(true);
-      var marked = 0;
+      var changed = 0;
       switch (action) {
         case _GroupAction.start:
           await MeetingService.startGroup(active.id, number, present: present);
@@ -250,7 +256,7 @@ class _LiveScreenState extends State<LiveScreen> {
         case _GroupAction.resume:
           await MeetingService.resumeGroup(active.id, number);
         case _GroupAction.attendance:
-          marked = await MeetingService.markAttendance(
+          changed = await MeetingService.setAttendance(
             active.id,
             number,
             regs,
@@ -264,9 +270,9 @@ class _LiveScreenState extends State<LiveScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              marked > 0
-                  ? '$marked student(s) marked present'
-                  : 'No new students were marked',
+              changed > 0
+                  ? 'Attendance saved ($changed changed)'
+                  : 'Attendance already up to date',
             ),
           ),
         );
@@ -428,14 +434,14 @@ class _LiveScreenState extends State<LiveScreen> {
               canStart: canStart(row),
               canEnd: canEnd(row),
               canPauseResume: canPauseResume(row),
-              canMarkAttendance: canMarkAttendance(row),
+              canEditAttendance: canEditAttendance(row),
               onStart: () => changeGroup(number, _GroupAction.start),
               onEnd: () => changeGroup(number, _GroupAction.end),
               onPauseResume: () => changeGroup(
                 number,
                 status == 'paused' ? _GroupAction.resume : _GroupAction.pause,
               ),
-              onMarkAttendance: (regs) =>
+              onSaveAttendance: (regs) =>
                   changeGroup(number, _GroupAction.attendance, regs: regs),
             );
           },
