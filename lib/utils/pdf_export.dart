@@ -152,7 +152,7 @@ Future<void> downloadMeetingPdf(
       ? formatTime(ended)
       : (started == null ? '-' : 'In progress');
 
-  // ---------- columns ----------
+  // ------- columns --------
   final labels = [
     'S.No',
     'Reg #',
@@ -165,6 +165,7 @@ Future<void> downloadMeetingPdf(
     'Total Time',
     if (withAttendance) 'Attendance',
   ];
+
   final base = <double>[34, 88, 112, 80, 150, 72, 58, 62, 52, if (withAttendance) 62];
   final pageWidth = PdfPageFormat.a4.landscape.width - 56; // 28pt margins
   final scale = pageWidth / base.fold<double>(0, (a, b) => a + b);
