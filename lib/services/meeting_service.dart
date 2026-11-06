@@ -170,10 +170,10 @@ class MeetingService {
         .from('meetings')
         .delete()
         .eq('id', id)
-        .eq('status', 'upcoming')
+        .inFilter('status', ['upcoming', 'done'])
         .select();
     if (deleted.isEmpty) {
-      throw Exception('Only upcoming meetings can be deleted');
+      throw Exception('Only upcoming or finished meetings can be deleted');
     }
   }
 }

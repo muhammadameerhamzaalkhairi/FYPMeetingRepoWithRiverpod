@@ -99,6 +99,8 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
   final List<_Snap> undoStack = [];
   final List<_Snap> redoStack = [];
   int? expanded; // uid of the expanded group
+  _Group? copied; // group copied from the three-dots menu, ready to paste
+  final scroll = ScrollController();
   bool isLoading = true;
   bool busy = false;
   String errorMessage = '';
@@ -116,6 +118,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
   @override
   void dispose() {
     search.dispose();
+    scroll.dispose();
     super.dispose();
   }
 
@@ -288,13 +291,76 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
     setState(() {
       pushHistory();
       groups.add(result);
-      final lastSlot = slots.isNotEmpty
-          ? slots.last
-          : locked.isNotEmpty
-          ? locked.fold<int>(0, (a, l) => l.time > a ? l.time : a)
-          : null;
-      slots.add(lastSlot == null ? 9 * 60 : lastSlot + gap);
+      slots.add(nextSlot());
       expanded = result.uid;
+    });
+  }
+
+  // Time slot (minutes) for a group added at the very end of the list.
+  int nextSlot() {
+    final lastSlot = slots.isNotEmpty
+        ? slots.last
+        : locked.isNotEmpty
+        ? locked.fold<int>(0, (a, l) => l.time > a ? l.time : a)
+        : null;
+    return lastSlot == null ? 9 * 60 : lastSlot + gap;
+  }
+
+  // ---------- copy / paste ----------
+  void copyGroup(int index) {
+    setState(() => copied = groups[index].copy());
+    snack('Group copied. Tap Paste at the top to add it at the end.');
+  }
+
+  // Reg # is unique per meeting in the DB, so a pasted student can't keep
+  // the original's Reg #. It is kept only if nobody uses it any more.
+  String uniqueReg(String reg, Set<String> taken) {
+    final base = reg.trim();
+    if (!taken.contains(base.toLowerCase())) return base;
+    var candidate = '$base-copy';
+    var n = 2;
+    while (taken.contains(candidate.toLowerCase())) {
+      candidate = '$base-copy$n';
+      n++;
+    }
+    return candidate;
+  }
+
+  void paste() {
+    final source = copied;
+    if (source == null || busy) return;
+    final taken = regsExcept(null);
+    var renamed = false;
+    final students = <_Student>[];
+    for (final s in source.students) {
+      final reg = uniqueReg(s.reg, taken);
+      if (reg != s.reg.trim()) renamed = true;
+      taken.add(reg.toLowerCase());
+      students.add(_Student(s.name, reg, s.tech));
+    }
+    // No uid passed: the pasted group is a brand new, separate group.
+    final pasted = _Group(
+      project: source.project,
+      supervisor: source.supervisor,
+      students: students,
+    );
+    setState(() {
+      pushHistory();
+      groups.add(pasted);
+      slots.add(nextSlot());
+      expanded = pasted.uid;
+    });
+    snack(
+      'Pasted as group ${numberOf(groups.length - 1)}'
+      '${renamed ? '. Reg # were changed to stay unique, edit them before saving.' : ''}',
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!scroll.hasClients) return;
+      scroll.animateTo(
+        scroll.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
     });
   }
 
@@ -599,18 +665,32 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
                   ),
                 ),
               ),
-              IconButton(
-                tooltip: 'Edit group',
-                onPressed: busy ? null : () => editGroup(index),
-                icon: const Icon(Icons.edit_outlined),
-                color: Colors.black,
+              PopupMenuButton<String>(
+                tooltip: 'Group actions',
+                enabled: !busy,
+                color: Colors.white,
+                icon: const Icon(Icons.more_vert_rounded, color: Colors.black),
                 // Responsive: smaller tap area on narrow phones so the
                 // title gets more room.
-                visualDensity: narrow
-                    ? VisualDensity.compact
-                    : VisualDensity.standard,
-                padding: narrow ? const EdgeInsets.all(4) : null,
-                constraints: narrow ? const BoxConstraints() : null,
+                padding: narrow ? const EdgeInsets.all(4) : const EdgeInsets.all(8),
+                onSelected: (value) {
+                  switch (value) {
+                    case 'copy':
+                      copyGroup(index);
+                    case 'edit':
+                      editGroup(index);
+                    case 'delete':
+                      deleteGroup(index);
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'copy', child: Text('Copy')),
+                  PopupMenuItem(value: 'edit', child: Text('Edit')),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text('Delete', style: TextStyle(color: Colors.red)),
+                  ),
+                ],
               ),
               IconButton(
                 onPressed: () =>
@@ -696,6 +776,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
         );
       }
       return ListView.builder(
+        controller: scroll,
         padding: const EdgeInsets.only(bottom: 90),
         itemCount: visibleLocked.length + visible.length,
         itemBuilder: (_, i) => i < visibleLocked.length
@@ -705,6 +786,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
     }
 
     return ReorderableListView.builder(
+      scrollController: scroll,
       buildDefaultDragHandles: false,
       padding: const EdgeInsets.only(bottom: 90),
       // Locked groups sit above the list: read-only, never reorderable.
@@ -794,6 +876,12 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
                     tooltip: 'Redo',
                     onPressed: redoStack.isEmpty || busy ? null : redo,
                     icon: const Icon(Icons.redo_rounded),
+                    color: const Color(0xFF111111),
+                  ),
+                  IconButton(
+                    tooltip: 'Paste group',
+                    onPressed: copied == null || busy ? null : paste,
+                    icon: const Icon(Icons.content_paste_rounded),
                     color: const Color(0xFF111111),
                   ),
                   // Deleting a whole meeting stays limited to upcoming ones.

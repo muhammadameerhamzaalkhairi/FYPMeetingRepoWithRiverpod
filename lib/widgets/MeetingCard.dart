@@ -17,6 +17,7 @@ class MeetingCard extends StatelessWidget {
   final VoidCallback? onRestart;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
+  final VoidCallback? onDownload;
   const MeetingCard({
     super.key,
     required this.meeting,
@@ -28,6 +29,7 @@ class MeetingCard extends StatelessWidget {
     this.onRestart,
     this.onEdit,
     this.onDelete,
+    this.onDownload,
   });
 
   Widget chip(String text) => Container(
@@ -56,9 +58,9 @@ class MeetingCard extends StatelessWidget {
     final narrow = MediaQuery.sizeOf(context).width < 360;
     final pad = narrow ? 10.0 : 12.0;
 
-    return Opacity(
-      opacity: locked ? 0.5 : 1,
-      child: AnimatedContainer(
+    // The card keeps its normal look when another meeting is running; only
+    // the buttons that can't be used are faded (see fadeWhenDisabled).
+    return AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         width: double.infinity,
         margin: const EdgeInsets.only(bottom: 10),
@@ -81,6 +83,17 @@ class MeetingCard extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                if (onDownload != null)
+                  GestureDetector(
+                    onTap: busy ? null : onDownload,
+                    child: Opacity(
+                      opacity: busy ? 0.4 : 1,
+                      child: const Padding(
+                        padding: EdgeInsets.only(left: 8),
+                        child: Icon(Icons.download_rounded, size: 24),
+                      ),
+                    ),
+                  ),
                 if (onEdit != null)
                   GestureDetector(
                     onTap: busy ? null : onEdit,
@@ -174,6 +187,7 @@ class MeetingCard extends StatelessWidget {
                   height: 48,
                   fontSize: narrow ? 14 : 15,
                   enabled: enabled,
+                  fadeWhenDisabled: true,
                   onTap: onRestart,
                 ),
               ],
@@ -189,6 +203,7 @@ class MeetingCard extends StatelessWidget {
                       height: 48,
                       fontSize: narrow ? 14 : 15,
                       enabled: enabled && meeting.status == 'upcoming',
+                      fadeWhenDisabled: true,
                       onTap: onStart,
                     ),
                   ),
@@ -198,6 +213,7 @@ class MeetingCard extends StatelessWidget {
                       height: 48,
                       fontSize: narrow ? 14 : 15,
                       enabled: enabled && meeting.isActive,
+                      fadeWhenDisabled: true,
                       onTap: onPauseResume,
                     ),
                   ),
@@ -207,6 +223,7 @@ class MeetingCard extends StatelessWidget {
                       height: 48,
                       fontSize: narrow ? 14 : 15,
                       enabled: enabled && meeting.isActive,
+                      fadeWhenDisabled: true,
                       onTap: onEnd,
                     ),
                   ),
@@ -215,7 +232,6 @@ class MeetingCard extends StatelessWidget {
             ],
           ],
         ),
-      ),
     );
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:livemeet/models/meeting.dart';
 import 'package:livemeet/screens/main_screen.dart';
 import 'package:livemeet/services/meeting_service.dart';
+import 'package:livemeet/utils/pdf_export.dart';
 import 'package:livemeet/utils/time_utils.dart';
 import 'package:livemeet/widgets/CustomText.dart';
 import 'package:livemeet/widgets/Button.dart';
@@ -258,11 +259,13 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                     : null,
                 // Settings can now be edited while the meeting is running or
                 // paused too (only finished meetings are locked).
+                onDownload: () => downloadMeeting(meeting),
                 onEdit: meeting.status != 'done'
                     ? () => openEditor(meeting)
                     : null,
-                // Deleting a whole meeting stays limited to upcoming ones.
-                onDelete: meeting.status == 'upcoming'
+                // Upcoming and finished (Previous) meetings can be deleted;
+                // running or paused ones cannot.
+                onDelete: meeting.status == 'upcoming' || meeting.status == 'done'
                     ? () => deleteMeeting(meeting)
                     : null,
               );
@@ -271,6 +274,33 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
         );
       },
     );
+  }
+
+  // Coming meetings: 9 columns. Previous (finished) meetings: + Attendance.
+  Future<void> downloadMeeting(Meeting meeting) async {
+    if (busy || isLoading) return;
+    setState(() => busy = true);
+    try {
+      final rows = await MeetingService.fetchRows(meeting.id);
+      if (!mounted) return;
+      await downloadMeetingPdf(
+        meeting,
+        rows,
+        withAttendance: meeting.status == 'done',
+      );
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   Future<void> deleteMeeting(Meeting meeting) async {
