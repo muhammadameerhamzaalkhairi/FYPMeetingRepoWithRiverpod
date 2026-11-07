@@ -1,22 +1,11 @@
-import 'package:livemeet/services/meeting_service.dart';
-
-Duration serverOffset = Duration.zero;
-
-Future<void> syncServerClock() async {
-  serverOffset = (await MeetingService.fetchServerNow()).difference(
-    DateTime.now(),
-  );
-}
-
-DateTime nowServer() => DateTime.now().add(serverOffset);
-
 int elapsedSec({
   required DateTime startedAt,
+  DateTime? now,
   int pausedSeconds = 0,
   DateTime? frozenAt,
   DateTime? endedAt,
 }) {
-  final end = endedAt ?? frozenAt ?? nowServer();
+  final end = endedAt ?? frozenAt ?? now ?? DateTime.now();
   final seconds = end.difference(startedAt).inSeconds - pausedSeconds;
   return seconds < 0 ? 0 : seconds;
 }

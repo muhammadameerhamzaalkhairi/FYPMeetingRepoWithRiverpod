@@ -1,9 +1,12 @@
+import 'package:livemeet/utils/app_error.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:livemeet/providers/app_providers.dart';
+import 'package:livemeet/providers/meeting_providers.dart';
 import 'package:livemeet/models/meeting.dart';
 import 'package:livemeet/screens/main_screen.dart';
-import 'package:livemeet/services/meeting_service.dart';
 import 'package:livemeet/utils/time_utils.dart';
 import 'package:livemeet/widgets/Button.dart';
 import 'package:livemeet/widgets/CustomText.dart';
@@ -12,11 +15,10 @@ import 'package:livemeet/widgets/TextBox.dart';
 import 'package:livemeet/widgets/attendance_dialog.dart';
 import 'package:livemeet/widgets/confirm_dialog.dart';
 import 'package:livemeet/widgets/filter.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 enum _GroupAction { start, end, pause, resume, attendance }
 
-class LiveScreen extends StatefulWidget {
+class LiveScreen extends ConsumerStatefulWidget {
   final void Function(int) onNavigate;
   final ValueChanged<bool> onBusyChanged;
 
@@ -27,10 +29,10 @@ class LiveScreen extends StatefulWidget {
   });
 
   @override
-  State<LiveScreen> createState() => _LiveScreenState();
+  ConsumerState<LiveScreen> createState() => _LiveScreenState();
 }
 
-class _LiveScreenState extends State<LiveScreen> {
+class _LiveScreenState extends ConsumerState<LiveScreen> {
   static const sortRank = {
     'running': 0,
     'paused': 1,
@@ -40,14 +42,18 @@ class _LiveScreenState extends State<LiveScreen> {
   };
   static const filters = ['All', 'Running', 'Upcoming', 'Paused', 'Done'];
   final search = TextEditingController();
-  Meeting? meeting;
-  Map<int, List<Map<String, dynamic>>> groups = {};
+  final _dataKey = Object();
+  late final ActiveMeetingController _controller;
+  MeetingLoadState<ActiveMeetingData> get _data =>
+      ref.read(activeMeetingProvider(_dataKey));
+  bool get isLoading => _data.isLoading;
+  bool get busy => _data.busy;
+  String get errorMessage => _data.errorMessage;
+  Meeting? get meeting => _data.data.meeting;
+  Map<int, List<Map<String, dynamic>>> get groups => _data.data.groups;
   int selectedFilter = 0;
   int? selectedGroup;
   int? expandedGroup;
-  bool isLoading = false;
-  bool busy = false;
-  String errorMessage = '';
   late final Timer ticker;
 
   // Responsive: true on small phones (width < 360 px).
@@ -56,8 +62,11 @@ class _LiveScreenState extends State<LiveScreen> {
   @override
   void initState() {
     super.initState();
+    _controller = ref.read(activeMeetingProvider(_dataKey).notifier);
     search.addListener(searchChanged);
-    loadMeeting(selectRunningGroup: true);
+    Future.microtask(() {
+      if (mounted) loadMeeting(selectRunningGroup: true);
+    });
     ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && meeting?.status == 'running' && hasRunningGroup) {
         setState(() {});
@@ -69,6 +78,7 @@ class _LiveScreenState extends State<LiveScreen> {
 
   @override
   void dispose() {
+    _controller.cancelLoads();
     ticker.cancel();
     search.removeListener(searchChanged);
     search.dispose();
@@ -77,53 +87,28 @@ class _LiveScreenState extends State<LiveScreen> {
 
   // silent = refresh the data without the loading spinner, so open cards and
   // their timers are not rebuilt from scratch (used after saving attendance).
+  // Attendance refreshes keep cards mounted and retain unsaved checkbox drafts.
   Future<void> loadMeeting({
     bool selectRunningGroup = false,
     bool silent = false,
   }) async {
+    final previousId = meeting?.id;
+    final loaded = await _controller.load(silent: silent);
+    if (!mounted || !loaded) return;
     setState(() {
-      if (!silent) isLoading = true;
-      errorMessage = '';
-    });
-    try {
-      await syncServerClock();
-      if (!mounted) return;
-      final active = await MeetingService.fetchActiveMeeting();
-      if (!mounted) return;
-      final Map<int, List<Map<String, dynamic>>> loaded = {};
-      if (active != null) {
-        final rows = await MeetingService.fetchRows(active.id);
-        if (!mounted) return;
-        for (final row in rows) {
-          final number = (row['group_no'] as num).toInt();
-          loaded.putIfAbsent(number, () => []).add(row);
-        }
+      if (previousId != meeting?.id) {
+        selectedGroup = null;
+        expandedGroup = null;
       }
-      setState(() {
-        if (meeting?.id != active?.id) {
-          selectedGroup = null;
-          expandedGroup = null;
-        }
-        meeting = active;
-        groups = loaded;
-        if (selectRunningGroup) {
-          selectedGroup = groups.entries
-              .where((entry) => entry.value.first['status'] == 'running')
-              .map((entry) => entry.key)
-              .firstOrNull;
-        }
-        if (!groups.containsKey(selectedGroup)) selectedGroup = null;
-        if (!groups.containsKey(expandedGroup)) expandedGroup = null;
-      });
-    } on PostgrestException catch (e) {
-      if (!mounted) return;
-      setState(() => errorMessage = e.message);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => errorMessage = 'Unable to load groups: $e');
-    } finally {
-      if (mounted && !silent) setState(() => isLoading = false);
-    }
+      if (selectRunningGroup) {
+        selectedGroup = groups.entries
+            .where((entry) => entry.value.first['status'] == 'running')
+            .map((entry) => entry.key)
+            .firstOrNull;
+      }
+      if (!groups.containsKey(selectedGroup)) selectedGroup = null;
+      if (!groups.containsKey(expandedGroup)) expandedGroup = null;
+    });
   }
 
   Future<void> refreshMeeting() async {
@@ -182,6 +167,7 @@ class _LiveScreenState extends State<LiveScreen> {
       case 'running':
         return formatClock(
           elapsedSec(
+            now: ref.read(serverClockProvider.notifier).now(),
             startedAt: DateTime.parse(startedAt),
             pausedSeconds: pausedSeconds,
             frozenAt: meeting?.pausedAt,
@@ -194,6 +180,7 @@ class _LiveScreenState extends State<LiveScreen> {
         final pausedAt = row['paused_at'] as String?;
         return formatClock(
           elapsedSec(
+            now: ref.read(serverClockProvider.notifier).now(),
             startedAt: DateTime.parse(startedAt),
             pausedSeconds: pausedSeconds,
             frozenAt: pausedAt == null ? null : DateTime.parse(pausedAt),
@@ -222,7 +209,7 @@ class _LiveScreenState extends State<LiveScreen> {
       _GroupAction.attendance => canEditAttendance(row),
     };
     if (!allowed) return;
-    setState(() => busy = true);
+    _controller.setBusy(true);
     try {
       List<String>? present;
       if (action == _GroupAction.start) {
@@ -248,19 +235,19 @@ class _LiveScreenState extends State<LiveScreen> {
       var changed = 0;
       switch (action) {
         case _GroupAction.start:
-          await MeetingService.startGroup(active.id, number, present: present);
+          await ref
+              .read(meetingServiceProvider)
+              .startGroup(active.id, number, present: present);
         case _GroupAction.end:
-          await MeetingService.endGroup(active.id, number);
+          await ref.read(meetingServiceProvider).endGroup(active.id, number);
         case _GroupAction.pause:
-          await MeetingService.pauseGroup(active.id, number);
+          await ref.read(meetingServiceProvider).pauseGroup(active.id, number);
         case _GroupAction.resume:
-          await MeetingService.resumeGroup(active.id, number);
+          await ref.read(meetingServiceProvider).resumeGroup(active.id, number);
         case _GroupAction.attendance:
-          changed = await MeetingService.setAttendance(
-            active.id,
-            number,
-            regs,
-          );
+          changed = await ref
+              .read(meetingServiceProvider)
+              .setAttendance(active.id, number, regs);
       }
       if (!mounted) return;
       if (action == _GroupAction.start || action == _GroupAction.resume) {
@@ -279,23 +266,23 @@ class _LiveScreenState extends State<LiveScreen> {
       }
       await loadMeeting(silent: action == _GroupAction.attendance);
       if (!mounted) return;
-    } on PostgrestException catch (e) {
+    } catch (e, stack) {
+      final message = AppError.handle(
+        e,
+        stack,
+        action: action == _GroupAction.attendance
+            ? ErrorAction.attendance
+            : ErrorAction.group,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
-      await loadMeeting();
-      if (!mounted) return;
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Group action failed: $e')));
+      ).showSnackBar(SnackBar(content: Text(message)));
       await loadMeeting();
       if (!mounted) return;
     } finally {
       widget.onBusyChanged(false);
-      if (mounted) setState(() => busy = false);
+      if (mounted) _controller.setBusy(false);
     }
   }
 
@@ -452,10 +439,16 @@ class _LiveScreenState extends State<LiveScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(activeMeetingProvider(_dataKey));
     final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
     return Scaffold(
       body: Padding(
-        padding: EdgeInsets.fromLTRB(narrow ? 14 : 18, 60, narrow ? 14 : 18, 18),
+        padding: EdgeInsets.fromLTRB(
+          narrow ? 14 : 18,
+          60,
+          narrow ? 14 : 18,
+          18,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

@@ -1,26 +1,39 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livemeet/screens/login_screen.dart';
 import 'package:livemeet/screens/main_screen.dart';
+import 'package:livemeet/utils/app_error.dart';
+import 'package:livemeet/widgets/CustomText.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Supabase.initialize(
-    url: 'https://kgfmeyypggnwwmpfvygv.supabase.co',
-    // Keep the existing Supabase initialization outside this feature's scope.
-    // ignore: deprecated_member_use
-    anonKey:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtnZm1leXlwZ2dud3dtcGZ2eWd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3Mjg1MTMsImV4cCI6MjEwODMwNDUxM30.5FAcKGQFn9TUG1Ex2a5cRptDQau_9mc-NNyG9o1hG9c',
-  );
+  try {
+    await dotenv.load(fileName: '.env');
+    if (!dotenv.isEveryDefined(['SUPABASE_URL', 'SUPABASE_ANON_KEY'])) {
+      throw StateError('Missing SUPABASE_URL or SUPABASE_ANON_KEY in .env.');
+    }
 
-  runApp(const MyApp());
+    await Supabase.initialize(
+      url: dotenv.get('SUPABASE_URL'),
+      publishableKey: dotenv.get('SUPABASE_ANON_KEY'),
+    );
+  } catch (error, stack) {
+    final message = AppError.handle(error, stack, action: ErrorAction.startup);
+    runApp(ProviderScope(child: MyApp(startupError: message)));
+    return;
+  }
+
+  runApp(const ProviderScope(child: MyApp()));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({super.key, this.startupError});
+  final String? startupError;
 
-  // This widget is the root of your application.
+  // this widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -32,7 +45,7 @@ class MyApp extends StatelessWidget {
       ),
       // Responsive: limits very large phone font settings so layouts don't
       // break, and keeps the app a comfortable column (max 600 px wide) when
-      // opened on desktop/tablet.
+      
       builder: (context, child) {
         final mq = MediaQuery.of(context);
         return MediaQuery(
@@ -53,7 +66,16 @@ class MyApp extends StatelessWidget {
           ),
         );
       },
-      home: Supabase.instance.client.auth.currentSession == null
+      home: startupError != null
+          ? Scaffold(
+              body: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: CustomText(text: startupError!, color: Colors.red),
+                ),
+              ),
+            )
+          : Supabase.instance.client.auth.currentSession == null
           ? const LoginScreen()
           : const MainScreen(),
     );

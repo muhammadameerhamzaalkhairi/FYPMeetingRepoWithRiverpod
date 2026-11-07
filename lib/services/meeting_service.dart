@@ -1,20 +1,22 @@
+import 'package:livemeet/utils/app_error.dart';
 import 'package:livemeet/models/meeting.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class MeetingService {
-  static final _db = Supabase.instance.client;
+  MeetingService(this._db);
+  final SupabaseClient _db;
 
-  static Future<DateTime> fetchServerNow() async {
+  Future<DateTime> fetchServerNow() async {
     final result = await _db.rpc('server_now');
     return DateTime.parse(result as String);
   }
 
-  static Future<List<Meeting>> fetchMeetings() async {
+  Future<List<Meeting>> fetchMeetings() async {
     final rows = await _db.from('meetings_overview').select();
     return rows.map(Meeting.fromMap).toList();
   }
 
-  static Future<Meeting?> fetchActiveMeeting() async {
+  Future<Meeting?> fetchActiveMeeting() async {
     final rows = await _db
         .from('meetings_overview')
         .select()
@@ -23,7 +25,7 @@ class MeetingService {
     return rows.isEmpty ? null : Meeting.fromMap(rows.first);
   }
 
-  static Future<List<Map<String, dynamic>>> fetchRows(int meetingId) async {
+  Future<List<Map<String, dynamic>>> fetchRows(int meetingId) async {
     return await _db
         .from('meeting_schedule')
         .select()
@@ -32,7 +34,7 @@ class MeetingService {
         .order('id');
   }
 
-  static Future<Set<String>> fetchExistingDates(
+  Future<Set<String>> fetchExistingDates(
     String title,
     List<String> dates,
   ) async {
@@ -45,7 +47,7 @@ class MeetingService {
     return rows.map((row) => row['meeting_date'] as String).toSet();
   }
 
-  static Future<List<dynamic>> importSchedule(
+  Future<List<dynamic>> importSchedule(
     String title,
     List<Map<String, dynamic>> rows,
   ) async {
@@ -56,29 +58,40 @@ class MeetingService {
         as List<dynamic>;
   }
 
-  static Future<void> startMeeting(int id) async {
+  Future<void> startMeeting(int id) async {
     await _db.rpc('start_meeting', params: {'p_id': id});
   }
 
-  static Future<void> pauseMeeting(int id) async {
+  Future<List<dynamic>> updateSchedule(
+    String title,
+    List<Map<String, dynamic>> rows,
+  ) async {
+    return await _db.rpc(
+          'update_schedule',
+          params: {'p_title': title, 'p_rows': rows},
+        )
+        as List<dynamic>;
+  }
+
+  Future<void> pauseMeeting(int id) async {
     await _db.rpc('pause_meeting', params: {'p_id': id});
   }
 
-  static Future<void> resumeMeeting(int id) async {
+  Future<void> resumeMeeting(int id) async {
     await _db.rpc('resume_meeting', params: {'p_id': id});
   }
 
-  static Future<void> endMeeting(int id) async {
+  Future<void> endMeeting(int id) async {
     await _db.rpc('end_meeting', params: {'p_id': id});
   }
 
-  static Future<void> restartMeeting(int id) async {
+  Future<void> restartMeeting(int id) async {
     await _db.rpc('restart_meeting', params: {'p_id': id});
   }
 
   /// Starts an upcoming group. [present] = reg numbers of present students;
   /// null means everyone is present (the DB default).
-  static Future<void> startGroup(
+  Future<void> startGroup(
     int meetingId,
     int groupNo, {
     List<String>? present,
@@ -88,26 +101,26 @@ class MeetingService {
       params: {
         'p_meeting': meetingId,
         'p_group': groupNo,
-        if (present != null) 'p_present': present,
+        'p_present': ?present,
       },
     );
   }
 
-  static Future<void> pauseGroup(int meetingId, int groupNo) async {
+  Future<void> pauseGroup(int meetingId, int groupNo) async {
     await _db.rpc(
       'group_pause',
       params: {'p_meeting': meetingId, 'p_group': groupNo},
     );
   }
 
-  static Future<void> resumeGroup(int meetingId, int groupNo) async {
+  Future<void> resumeGroup(int meetingId, int groupNo) async {
     await _db.rpc(
       'group_resume',
       params: {'p_meeting': meetingId, 'p_group': groupNo},
     );
   }
 
-  static Future<void> endGroup(int meetingId, int groupNo) async {
+  Future<void> endGroup(int meetingId, int groupNo) async {
     await _db.rpc(
       'group_end',
       params: {'p_meeting': meetingId, 'p_group': groupNo},
@@ -116,7 +129,7 @@ class MeetingService {
 
   /// Old behaviour: only ADDS newly present students (never unmarks).
   /// Kept for compatibility; the Live screen now uses [setAttendance].
-  static Future<int> markAttendance(
+  Future<int> markAttendance(
     int meetingId,
     int groupNo,
     List<String> present,
@@ -129,13 +142,14 @@ class MeetingService {
         'p_present': present,
       },
     );
-    return (result as num?)?.toInt() ?? 0;
+    if (result is! num) throw StateError('Invalid attendance response');
+    return result.toInt();
   }
 
   /// Sets attendance of a started group to EXACTLY [present] (reg numbers):
   /// listed students become present, all others in the group become absent.
   /// Returns how many students changed.
-  static Future<int> setAttendance(
+  Future<int> setAttendance(
     int meetingId,
     int groupNo,
     List<String> present,
@@ -148,11 +162,12 @@ class MeetingService {
         'p_present': present,
       },
     );
-    return (result as num?)?.toInt() ?? 0;
+    if (result is! num) throw StateError('Invalid attendance response');
+    return result.toInt();
   }
 
   /// Returns {updated, added, removed}.
-  static Future<Map<String, dynamic>> saveSchedule(
+  Future<Map<String, dynamic>> saveSchedule(
     int meetingId,
     List<Map<String, dynamic>> rows,
   ) async {
@@ -160,20 +175,22 @@ class MeetingService {
       'save_meeting_schedule',
       params: {'p_id': meetingId, 'p_rows': rows},
     );
-    return result is Map
-        ? Map<String, dynamic>.from(result)
-        : <String, dynamic>{};
+    if (result is! Map ||
+        !['updated', 'added', 'removed'].every((key) => result[key] is num)) {
+      throw StateError('Invalid save schedule response');
+    }
+    return Map<String, dynamic>.from(result);
   }
 
-  static Future<void> deleteMeeting(int id) async {
-    final deleted = await _db
-        .from('meetings')
-        .delete()
-        .eq('id', id)
-        .inFilter('status', ['upcoming', 'done'])
-        .select();
+  Future<void> deleteMeeting(int id) async {
+    final deleted = await _db.from('meetings').delete().eq('id', id).inFilter(
+      'status',
+      ['upcoming', 'done'],
+    ).select();
     if (deleted.isEmpty) {
-      throw Exception('Only upcoming or finished meetings can be deleted');
+      throw const UserMessageException(
+        'This meeting could not be deleted. It may have started or already been removed. Refresh and try again.',
+      );
     }
   }
 }

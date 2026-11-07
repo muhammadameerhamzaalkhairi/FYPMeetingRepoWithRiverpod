@@ -1,17 +1,19 @@
+import 'package:livemeet/utils/app_error.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:livemeet/providers/app_providers.dart';
+import 'package:livemeet/providers/meeting_providers.dart';
 import 'package:livemeet/models/meeting.dart';
 import 'package:livemeet/screens/login_screen.dart';
 import 'package:livemeet/screens/main_screen.dart';
-import 'package:livemeet/services/meeting_service.dart';
 import 'package:livemeet/utils/time_utils.dart';
 import 'package:livemeet/widgets/Button.dart';
 import 'package:livemeet/widgets/CustomText.dart';
 import 'package:livemeet/widgets/confirm_dialog.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-class DashboardScreen extends StatefulWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   final void Function(int) onNavigate;
   final ValueChanged<bool> onBusyChanged;
 
@@ -22,15 +24,20 @@ class DashboardScreen extends StatefulWidget {
   });
 
   @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
-  Meeting? meeting;
-  List<Map<String, dynamic>> groups = [];
-  bool isLoading = false;
-  bool busy = false;
-  String errorMessage = '';
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  final _dataKey = Object();
+  late final ActiveMeetingController _controller;
+  MeetingLoadState<ActiveMeetingData> get _data =>
+      ref.read(activeMeetingProvider(_dataKey));
+  bool get isLoading => _data.isLoading;
+  bool get busy => _data.busy;
+  String get errorMessage => _data.errorMessage;
+  Meeting? get meeting => _data.data.meeting;
+  List<Map<String, dynamic>> get groups =>
+      _data.data.groups.values.map((rows) => rows.first).toList();
   late final Timer ticker;
   bool liveExpanded = false;
 
@@ -40,7 +47,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    loadMeeting();
+    _controller = ref.read(activeMeetingProvider(_dataKey).notifier);
+    Future.microtask(() {
+      if (mounted) loadMeeting();
+    });
     ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && meeting?.status == 'running') {
         setState(() {});
@@ -50,41 +60,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    _controller.cancelLoads();
     ticker.cancel();
     super.dispose();
   }
 
   Future<void> loadMeeting() async {
-    setState(() {
-      isLoading = true;
-      errorMessage = '';
-    });
-    try {
-      await syncServerClock();
-      if (!mounted) return;
-      final active = await MeetingService.fetchActiveMeeting();
-      if (!mounted) return;
-      final Map<int, Map<String, dynamic>> loaded = {};
-      if (active != null) {
-        final rows = await MeetingService.fetchRows(active.id);
-        if (!mounted) return;
-        for (final row in rows) {
-          loaded.putIfAbsent((row['group_no'] as num).toInt(), () => row);
-        }
-      }
-      setState(() {
-        meeting = active;
-        groups = loaded.values.toList();
-      });
-    } on PostgrestException catch (e) {
-      if (!mounted) return;
-      setState(() => errorMessage = e.message);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => errorMessage = 'Unable to load meeting: $e');
-    } finally {
-      if (mounted) setState(() => isLoading = false);
-    }
+    await _controller.load(action: ErrorAction.loadMeeting);
   }
 
   Map<String, dynamic>? get runningGroup =>
@@ -95,7 +77,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> logout() async {
     if (busy) return;
-    setState(() => busy = true);
+    _controller.setBusy(true);
     try {
       final confirmed = await showConfirmDialog(
         context,
@@ -106,25 +88,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (!mounted) return;
       if (!confirmed) return;
       widget.onBusyChanged(true);
-      await Supabase.instance.client.auth.signOut();
+      await ref.read(supabaseClientProvider).auth.signOut();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
         (_) => false,
       );
-    } on AuthException catch (e) {
+    } catch (e, stack) {
+      final message = AppError.handle(e, stack, action: ErrorAction.signOut);
+      if (mounted &&
+          ref.read(supabaseClientProvider).auth.currentSession == null) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (_) => false,
+        );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Unable to logout: $e')));
+      ).showSnackBar(SnackBar(content: Text(message)));
     } finally {
       widget.onBusyChanged(false);
-      if (mounted) setState(() => busy = false);
+      if (mounted) _controller.setBusy(false);
     }
   }
 
@@ -137,7 +122,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         !active.isActive) {
       return;
     }
-    setState(() => busy = true);
+    _controller.setBusy(true);
     try {
       if (end) {
         final confirmed = await showConfirmDialog(
@@ -149,13 +134,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (!mounted) return;
         if (!confirmed) return;
         widget.onBusyChanged(true);
-        await MeetingService.endMeeting(active.id);
+        await ref.read(meetingServiceProvider).endMeeting(active.id);
       } else if (active.status == 'paused') {
         widget.onBusyChanged(true);
-        await MeetingService.resumeMeeting(active.id);
+        await ref.read(meetingServiceProvider).resumeMeeting(active.id);
       } else {
         widget.onBusyChanged(true);
-        await MeetingService.pauseMeeting(active.id);
+        await ref.read(meetingServiceProvider).pauseMeeting(active.id);
       }
       if (!mounted) return;
       if (end) {
@@ -165,23 +150,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
       await loadMeeting();
       if (!mounted) return;
-    } on PostgrestException catch (e) {
+    } catch (e, stack) {
+      final message = AppError.handle(e, stack, action: ErrorAction.meeting);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
-      await loadMeeting();
-      if (!mounted) return;
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Meeting action failed: $e')));
+      ).showSnackBar(SnackBar(content: Text(message)));
       await loadMeeting();
       if (!mounted) return;
     } finally {
       widget.onBusyChanged(false);
-      if (mounted) setState(() => busy = false);
+      if (mounted) _controller.setBusy(false);
     }
   }
 
@@ -264,6 +243,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ? '—'
                                 : formatClock(
                                     elapsedSec(
+                                      now: ref
+                                          .read(serverClockProvider.notifier)
+                                          .now(),
                                       startedAt: meetingStarted,
                                       pausedSeconds: active.pausedSeconds,
                                       frozenAt: active.pausedAt,
@@ -348,6 +330,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ? '—'
                       : formatClock(
                           elapsedSec(
+                            now: ref.read(serverClockProvider.notifier).now(),
                             startedAt: DateTime.parse(started),
                             pausedSeconds:
                                 (running['paused_seconds'] as num?)?.toInt() ??
@@ -513,6 +496,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(activeMeetingProvider(_dataKey));
     final active = meeting;
     final ready = !isLoading && errorMessage.isEmpty;
     return Scaffold(

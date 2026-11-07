@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:livemeet/providers/app_providers.dart';
 import 'package:livemeet/screens/dashboard_screen.dart';
 import 'package:livemeet/screens/import_screen.dart';
 import 'package:livemeet/screens/live_screen.dart';
@@ -10,25 +12,26 @@ const kLive = 1;
 const kMeetings = 2;
 const kImport = 3;
 
-class MainScreen extends StatefulWidget {
+class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
 
   @override
-  State<MainScreen> createState() => _MainScreenState();
+  ConsumerState<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
-  int index = kHome;
-  bool busy = false;
+class _MainScreenState extends ConsumerState<MainScreen> {
+  final _navigationKey = Object();
+  int get index => ref.read(navigationProvider(_navigationKey)).index;
+  bool get busy => ref.read(navigationProvider(_navigationKey)).busy;
 
   void go(int i) {
     if (!mounted || busy) return;
-    setState(() => index = i);
+    ref.read(navigationProvider(_navigationKey).notifier).go(i);
   }
 
   void setBusy(bool value) {
     if (!mounted) return;
-    setState(() => busy = value);
+    ref.read(navigationProvider(_navigationKey).notifier).setBusy(value);
   }
 
   Widget navigationButton(String label, int tabIndex, {required bool narrow}) {
@@ -51,6 +54,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     // Responsive: tighter nav bar spacing on narrow phones so the four
     // buttons get more room.
+    ref.watch(navigationProvider(_navigationKey));
     final narrow = MediaQuery.sizeOf(context).width < 360;
 
     return Scaffold(

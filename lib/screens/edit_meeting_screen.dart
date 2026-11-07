@@ -1,19 +1,17 @@
+import 'package:livemeet/utils/app_error.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:livemeet/providers/app_providers.dart';
 import 'package:livemeet/models/meeting.dart';
-import 'package:livemeet/services/meeting_service.dart';
+import 'package:livemeet/models/meeting_draft.dart';
+import 'package:livemeet/providers/editor_provider.dart';
 import 'package:livemeet/utils/time_utils.dart';
 import 'package:livemeet/widgets/Button.dart';
 import 'package:livemeet/widgets/CustomText.dart';
 import 'package:livemeet/widgets/TextBox.dart';
 import 'package:livemeet/widgets/confirm_dialog.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ---------- helpers ----------
-int _toMin(String t) {
-  final p = t.split(':');
-  return int.parse(p[0]) * 60 + int.parse(p[1]);
-}
-
 String _hhmm(int m) {
   m = m % 1440;
   return '${(m ~/ 60).toString().padLeft(2, '0')}:${(m % 60).toString().padLeft(2, '0')}';
@@ -24,92 +22,31 @@ String _label(int m) {
   return formatTime(DateTime(2000, 1, 1, m ~/ 60, m % 60));
 }
 
-// ---------- local models ----------
-class _Student {
-  String name, reg, tech;
-  _Student(this.name, this.reg, this.tech);
-  _Student copy() => _Student(name, reg, tech);
-}
-
-int _nextUid = 0;
-
-// An upcoming group: the only kind that can be edited, added, deleted
-// or reordered.
-class _Group {
-  final int uid;
-  String project, supervisor;
-  List<_Student> students;
-
-  _Group({
-    int? uid,
-    required this.project,
-    required this.supervisor,
-    required this.students,
-  }) : uid = uid ?? _nextUid++;
-
-  _Group copy() => _Group(
-    uid: uid,
-    project: project,
-    supervisor: supervisor,
-    students: students.map((s) => s.copy()).toList(),
-  );
-}
-
-// Global clipboard: survives leaving/opening other meetings' edit screens.
-_Group? _clipboard;
-
-// A group with progress (running / paused / done / skipped). The DB never
-// changes these, so they are shown read-only and never sent back.
-class _Locked {
-  final int no, time;
-  final String status, project, supervisor;
-  final List<_Student> students;
-
-  _Locked({
-    required this.no,
-    required this.time,
-    required this.status,
-    required this.project,
-    required this.supervisor,
-    required this.students,
-  });
-
-  // Negative so it can never clash with an upcoming group's uid.
-  int get uid => -no;
-}
-
-class _Snap {
-  final List<_Group> groups;
-  final List<int> slots;
-  _Snap(this.groups, this.slots);
-}
-
 // ---------- screen ----------
-class EditMeetingScreen extends StatefulWidget {
+class EditMeetingScreen extends ConsumerStatefulWidget {
   final Meeting meeting;
   const EditMeetingScreen({super.key, required this.meeting});
 
   @override
-  State<EditMeetingScreen> createState() => _EditMeetingScreenState();
+  ConsumerState<EditMeetingScreen> createState() => _EditMeetingScreenState();
 }
 
-class _EditMeetingScreenState extends State<EditMeetingScreen> {
+class _EditMeetingScreenState extends ConsumerState<EditMeetingScreen> {
   final search = TextEditingController();
-  List<_Group> groups = []; // upcoming groups only (editable)
-  List<_Locked> locked = []; // groups with progress (read-only)
-  List<int> slots = []; // time (minutes) for each upcoming position
-  int gap = 15;
-  final List<_Snap> undoStack = [];
-  final List<_Snap> redoStack = [];
-  int? expanded; // uid of the expanded group
-
-  _Group? get copied => _clipboard;
-  set copied(_Group? value) => _clipboard = value;
-
+  final _draftKey = Object();
+  late final EditorController _controller;
+  EditorState get _draft => ref.read(editorProvider(_draftKey));
+  List<DraftGroup> get groups => _draft.groups;
+  List<LockedGroup> get locked => _draft.locked;
+  List<int> get slots => _draft.slots;
+  List<DraftSnapshot> get undoStack => _draft.undoStack;
+  List<DraftSnapshot> get redoStack => _draft.redoStack;
+  DraftGroup? get copied => ref.read(groupClipboardProvider);
+  int? expanded;
   final scroll = ScrollController();
-  bool isLoading = true;
-  bool busy = false;
-  String errorMessage = '';
+  bool get isLoading => _draft.isLoading;
+  bool get busy => _draft.busy;
+  String get errorMessage => _draft.errorMessage;
 
   // Responsive: true on small phones (width < 360 px).
   bool get narrow => MediaQuery.sizeOf(context).width < 360;
@@ -117,157 +54,31 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
   @override
   void initState() {
     super.initState();
+    _controller = ref.read(editorProvider(_draftKey).notifier);
     search.addListener(() => setState(() {}));
-    load();
+    Future.microtask(() {
+      if (mounted) load();
+    });
   }
 
   @override
   void dispose() {
+    _controller.cancelLoads();
     search.dispose();
     scroll.dispose();
     super.dispose();
   }
 
-  Future<void> load() async {
-    setState(() {
-      isLoading = true;
-      errorMessage = '';
-    });
-    try {
-      final rows = await MeetingService.fetchRows(widget.meeting.id);
-      if (!mounted) return;
-      final map = <int, _Group>{};
-      final times = <int, int>{};
-      final locks = <int, _Locked>{};
-      for (final r in rows) {
-        final no = (r['group_no'] as num).toInt();
-        final status = (r['status'] ?? 'upcoming').toString();
-        final student = _Student(
-          (r['student_name'] ?? '').toString(),
-          (r['reg_no'] ?? '').toString(),
-          (r['tech'] ?? '').toString(),
-        );
-        if (status != 'upcoming') {
-          locks
-              .putIfAbsent(
-                no,
-                () => _Locked(
-                  no: no,
-                  time: _toMin(r['meeting_time'] as String),
-                  status: status,
-                  project: (r['project'] ?? '').toString(),
-                  supervisor: (r['supervisor'] ?? '').toString(),
-                  students: [],
-                ),
-              )
-              .students
-              .add(student);
-          continue;
-        }
-        final g = map.putIfAbsent(no, () {
-          times[no] = _toMin(r['meeting_time'] as String);
-          return _Group(
-            project: (r['project'] ?? '').toString(),
-            supervisor: (r['supervisor'] ?? '').toString(),
-            students: [],
-          );
-        });
-        g.students.add(student);
-      }
-      final order = map.keys.toList()..sort();
-      // Gap is detected once, from the first two groups of the whole meeting.
-      final allTimes = {...times, for (final l in locks.values) l.no: l.time};
-      final allOrder = allTimes.keys.toList()..sort();
-      setState(() {
-        groups = [for (final k in order) map[k]!];
-        slots = [for (final k in order) times[k]!];
-        locked = locks.values.toList()..sort((a, b) => a.no.compareTo(b.no));
-        gap =
-            allOrder.length >= 2 &&
-                allTimes[allOrder[1]]! - allTimes[allOrder[0]]! > 0
-            ? allTimes[allOrder[1]]! - allTimes[allOrder[0]]!
-            : 15;
-        undoStack.clear();
-        redoStack.clear();
-      });
-    } on PostgrestException catch (e) {
-      if (!mounted) return;
-      setState(() => errorMessage = e.message);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => errorMessage = 'Unable to load groups: $e');
-    } finally {
-      if (mounted) setState(() => isLoading = false);
-    }
-  }
+  Future<void> load() => _controller.load(widget.meeting.id);
+  int numberOf(int index) => _controller.numberOf(index);
+  void undo() => _controller.undo();
+  void redo() => _controller.redo();
+  void onReorder(int oldIndex, int newIndex) =>
+      _controller.reorder(oldIndex, newIndex);
+  Set<String> regsExcept(int? uid) => _controller.regsExcept(uid);
 
-  // The number an upcoming group will have after saving: the DB gives
-  // upcoming groups the smallest group numbers not used by locked groups.
-  int numberOf(int index) {
-    final taken = {for (final l in locked) l.no};
-    var found = 0;
-    var candidate = 0;
-    while (true) {
-      candidate++;
-      if (taken.contains(candidate)) continue;
-      if (found == index) return candidate;
-      found++;
-    }
-  }
-
-  // ---------- undo / redo ----------
-  _Snap snapshot() =>
-      _Snap(groups.map((g) => g.copy()).toList(), List.of(slots));
-
-  void restore(_Snap s) {
-    groups = s.groups.map((g) => g.copy()).toList();
-    slots = List.of(s.slots);
-  }
-
-  void pushHistory() {
-    undoStack.add(snapshot());
-    redoStack.clear();
-  }
-
-  void undo() {
-    if (undoStack.isEmpty || busy) return;
-    setState(() {
-      redoStack.add(snapshot());
-      restore(undoStack.removeLast());
-    });
-  }
-
-  void redo() {
-    if (redoStack.isEmpty || busy) return;
-    setState(() {
-      undoStack.add(snapshot());
-      restore(redoStack.removeLast());
-    });
-  }
-
-  // ---------- actions ----------
-  void onReorder(int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) newIndex--;
-    if (oldIndex == newIndex) return;
-    setState(() {
-      pushHistory();
-      groups.insert(newIndex, groups.removeAt(oldIndex));
-      // slots stay in place, so numbers AND times follow the new position
-    });
-  }
-
-  // Students of locked groups count as taken too: the DB ignores incoming
-  // rows for them, so the same reg # can't be reused.
-  Set<String> regsExcept(int? uid) => {
-    for (final g in groups)
-      if (g.uid != uid)
-        for (final s in g.students) s.reg.trim().toLowerCase(),
-    for (final l in locked)
-      for (final s in l.students) s.reg.trim().toLowerCase(),
-  };
-
-  Future<_Group?> openEditor(_Group? group) {
-    return showModalBottomSheet<_Group>(
+  Future<DraftGroup?> openEditor(DraftGroup? group) {
+    return showModalBottomSheet<DraftGroup>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -284,81 +95,29 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
     if (busy) return;
     final result = await openEditor(groups[index]);
     if (result == null || !mounted) return;
-    setState(() {
-      pushHistory();
-      groups[index] = result;
-    });
+    _controller.replaceGroup(index, result);
   }
 
   Future<void> addGroup() async {
     if (busy) return;
     final result = await openEditor(null);
     if (result == null || !mounted) return;
-    setState(() {
-      pushHistory();
-      groups.add(result);
-      slots.add(nextSlot());
-      expanded = result.uid;
-    });
+    _controller.addGroup(result);
+    setState(() => expanded = result.uid);
   }
 
-  // Time slot (minutes) for a group added at the very end of the list.
-  int nextSlot() {
-    final lastSlot = slots.isNotEmpty
-        ? slots.last
-        : locked.isNotEmpty
-        ? locked.fold<int>(0, (a, l) => l.time > a ? l.time : a)
-        : null;
-    return lastSlot == null ? 9 * 60 : lastSlot + gap;
-  }
-
-  // ---------- copy / paste ----------
   void copyGroup(int index) {
-    setState(() => copied = groups[index].copy());
+    _controller.copyGroup(index);
     snack('Group copied. Tap Paste at the top to add it at the end.');
   }
 
-  // Reg # is unique per meeting in the DB, so a pasted student can't keep
-  // the original's Reg #. It is kept only if nobody uses it any more.
-  String uniqueReg(String reg, Set<String> taken) {
-    final base = reg.trim();
-    if (!taken.contains(base.toLowerCase())) return base;
-    var candidate = '$base-copy';
-    var n = 2;
-    while (taken.contains(candidate.toLowerCase())) {
-      candidate = '$base-copy$n';
-      n++;
-    }
-    return candidate;
-  }
-
   void paste() {
-    final source = copied;
-    if (source == null || busy) return;
-    final taken = regsExcept(null);
-    var renamed = false;
-    final students = <_Student>[];
-    for (final s in source.students) {
-      final reg = uniqueReg(s.reg, taken);
-      if (reg != s.reg.trim()) renamed = true;
-      taken.add(reg.toLowerCase());
-      students.add(_Student(s.name, reg, s.tech));
-    }
-    // No uid passed: the pasted group is a brand new, separate group.
-    final pasted = _Group(
-      project: source.project,
-      supervisor: source.supervisor,
-      students: students,
-    );
-    setState(() {
-      pushHistory();
-      groups.add(pasted);
-      slots.add(nextSlot());
-      expanded = pasted.uid;
-    });
+    final result = _controller.paste();
+    if (result == null) return;
+    setState(() => expanded = result.group.uid);
     snack(
       'Pasted as group ${numberOf(groups.length - 1)}'
-      '${renamed ? '. Reg # were changed to stay unique, edit them before saving.' : ''}',
+      '${result.renamed ? '. Reg # were changed to stay unique, edit them before saving.' : ''}',
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!scroll.hasClients) return;
@@ -379,16 +138,11 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
       confirmText: 'Delete',
     );
     if (!confirmed || !mounted) return;
-    setState(() {
-      pushHistory();
-      groups.removeAt(index);
-      slots.removeLast(); // later groups move up into earlier time slots
-    });
+    _controller.deleteGroup(index);
   }
 
-  void snack(String text) => ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(SnackBar(content: Text(text)));
+  void snack(String text) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
   // Result of save_meeting_schedule: {updated, added, removed} (student rows).
   String saveSummary(Map<String, dynamic> result) {
@@ -408,7 +162,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
       return;
     }
     final messenger = ScaffoldMessenger.of(context);
-    setState(() => busy = true);
+    _controller.setBusy(true);
     try {
       // Only upcoming groups are sent; locked groups are never touched.
       final rows = <Map<String, dynamic>>[];
@@ -425,16 +179,17 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
           });
         }
       }
-      final result = await MeetingService.saveSchedule(widget.meeting.id, rows);
+      final result = await ref
+          .read(meetingServiceProvider)
+          .saveSchedule(widget.meeting.id, rows);
       if (!mounted) return;
       messenger.showSnackBar(SnackBar(content: Text(saveSummary(result))));
       Navigator.of(context).pop(true);
-    } on PostgrestException catch (e) {
-      if (mounted) snack(e.message);
-    } catch (e) {
-      if (mounted) snack('Save failed: $e');
+    } catch (e, stack) {
+      final message = AppError.handle(e, stack, action: ErrorAction.save);
+      if (mounted) snack(message);
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) _controller.setBusy(false);
     }
   }
 
@@ -449,18 +204,17 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
     );
     if (!confirmed || !mounted) return;
     final messenger = ScaffoldMessenger.of(context);
-    setState(() => busy = true);
+    _controller.setBusy(true);
     try {
-      await MeetingService.deleteMeeting(widget.meeting.id);
+      await ref.read(meetingServiceProvider).deleteMeeting(widget.meeting.id);
       if (!mounted) return;
       messenger.showSnackBar(const SnackBar(content: Text('Meeting deleted')));
       Navigator.of(context).pop(true);
-    } on PostgrestException catch (e) {
-      if (mounted) snack(e.message);
-    } catch (e) {
-      if (mounted) snack('Delete failed: $e');
+    } catch (e, stack) {
+      final message = AppError.handle(e, stack, action: ErrorAction.delete);
+      if (mounted) snack(message);
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) _controller.setBusy(false);
     }
   }
 
@@ -481,7 +235,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
     });
   }
 
-  bool matchesLocked(_Locked l, List<String> words) {
+  bool matchesLocked(LockedGroup l, List<String> words) {
     final fields = [
       'group ${l.no}',
       l.status,
@@ -497,7 +251,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
     });
   }
 
-  List<Widget> studentTiles(List<_Student> students) => [
+  List<Widget> studentTiles(List<DraftStudent> students) => [
     for (final s in students)
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -529,7 +283,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
       ),
   ];
 
-  Widget lockedCard(_Locked l) {
+  Widget lockedCard(LockedGroup l) {
     final isOpen = expanded == l.uid;
     return Container(
       key: ValueKey('locked-${l.no}'),
@@ -678,7 +432,9 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
                 icon: const Icon(Icons.more_vert_rounded, color: Colors.black),
                 // Responsive: smaller tap area on narrow phones so the
                 // title gets more room.
-                padding: narrow ? const EdgeInsets.all(4) : const EdgeInsets.all(8),
+                padding: narrow
+                    ? const EdgeInsets.all(4)
+                    : const EdgeInsets.all(8),
                 onSelected: (value) {
                   switch (value) {
                     case 'copy':
@@ -812,7 +568,10 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
               ],
             ),
       itemCount: groups.length,
-      onReorder: onReorder,
+      // The controller accepts the original insertion index; the newer
+      // callback supplies an index after removal.
+      onReorderItem: (oldIndex, newIndex) =>
+          onReorder(oldIndex, newIndex > oldIndex ? newIndex + 1 : newIndex),
       proxyDecorator: (child, _, _) =>
           Material(color: Colors.transparent, child: child),
       itemBuilder: (_, i) => groupCard(i, draggable: true),
@@ -821,6 +580,8 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(editorProvider(_draftKey));
+    ref.watch(groupClipboardProvider);
     final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
     final canEdit = !isLoading && errorMessage.isEmpty;
     final sidePad = narrow ? 14.0 : 18.0;
@@ -834,7 +595,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
           message: 'Your unsaved changes will be lost.',
           confirmText: 'Discard',
         );
-        if (discard && mounted) Navigator.of(context).pop(false);
+        if (discard && context.mounted) Navigator.of(context).pop(false);
       },
       child: Scaffold(
         floatingActionButton: canEdit
@@ -935,7 +696,7 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
 // ---------- add / edit bottom sheet ----------
 class _StudentCtrl {
   final TextEditingController name, reg, tech;
-  _StudentCtrl([_Student? s])
+  _StudentCtrl([DraftStudent? s])
     : name = TextEditingController(text: s?.name ?? ''),
       reg = TextEditingController(text: s?.reg ?? ''),
       tech = TextEditingController(text: s?.tech ?? '');
@@ -948,7 +709,7 @@ class _StudentCtrl {
 }
 
 class _GroupEditor extends StatefulWidget {
-  final _Group? group;
+  final DraftGroup? group;
   final Set<String> takenRegs;
   const _GroupEditor({required this.group, required this.takenRegs});
 
@@ -986,8 +747,8 @@ class _GroupEditorState extends State<_GroupEditor> {
     super.dispose();
   }
 
-  String? required(String? v) =>
-      v == null || v.trim().isEmpty ? 'Required' : null;
+  String? requiredField(String? v, String label) =>
+      v == null || v.trim().isEmpty ? 'Enter $label.' : null;
 
   void submit() {
     if (!formKey.currentState!.validate()) return;
@@ -996,20 +757,25 @@ class _GroupEditorState extends State<_GroupEditor> {
       final reg = s.reg.text.trim().toLowerCase();
       if (!seen.add(reg) || widget.takenRegs.contains(reg)) {
         setState(
-          () => error = 'Reg # ${s.reg.text.trim()} is already used in this meeting.',
+          () => error =
+              'Reg # ${s.reg.text.trim()} is already used in this meeting.',
         );
         return;
       }
     }
     Navigator.pop(
       context,
-      _Group(
+      DraftGroup(
         uid: widget.group?.uid,
         project: project.text.trim(),
         supervisor: supervisor.text.trim(),
         students: [
           for (final s in students)
-            _Student(s.name.text.trim(), s.reg.text.trim(), s.tech.text.trim()),
+            DraftStudent(
+              s.name.text.trim(),
+              s.reg.text.trim(),
+              s.tech.text.trim(),
+            ),
         ],
       ),
     );
@@ -1040,13 +806,13 @@ class _GroupEditorState extends State<_GroupEditor> {
               TextBox(
                 hintText: 'Project name',
                 controller: project,
-                validator: required,
+                validator: (value) => requiredField(value, 'a project name'),
               ),
               const SizedBox(height: 10),
               TextBox(
                 hintText: 'Supervisor',
                 controller: supervisor,
-                validator: required,
+                validator: (value) => requiredField(value, 'a supervisor name'),
               ),
               const SizedBox(height: 15),
               const CustomText(
@@ -1086,13 +852,15 @@ class _GroupEditorState extends State<_GroupEditor> {
                       TextBox(
                         hintText: 'Student name',
                         controller: students[i].name,
-                        validator: required,
+                        validator: (value) =>
+                            requiredField(value, 'the student name'),
                       ),
                       const SizedBox(height: 8),
                       TextBox(
                         hintText: 'Reg #',
                         controller: students[i].reg,
-                        validator: required,
+                        validator: (value) =>
+                            requiredField(value, 'a registration number'),
                       ),
                       const SizedBox(height: 8),
                       TextBox(

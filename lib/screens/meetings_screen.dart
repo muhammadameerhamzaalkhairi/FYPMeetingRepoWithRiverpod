@@ -1,9 +1,12 @@
+import 'package:livemeet/utils/app_error.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:livemeet/providers/app_providers.dart';
+import 'package:livemeet/providers/meeting_providers.dart';
 import 'package:livemeet/models/meeting.dart';
 import 'package:livemeet/screens/main_screen.dart';
-import 'package:livemeet/services/meeting_service.dart';
 import 'package:livemeet/utils/pdf_export.dart';
 import 'package:livemeet/utils/time_utils.dart';
 import 'package:livemeet/widgets/CustomText.dart';
@@ -11,12 +14,11 @@ import 'package:livemeet/widgets/Button.dart';
 import 'package:livemeet/widgets/MeetingCard.dart';
 import 'package:livemeet/widgets/confirm_dialog.dart';
 import 'package:livemeet/widgets/filter.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:livemeet/screens/edit_meeting_screen.dart';
 
 enum _MeetingAction { start, pauseResume, end, restart }
 
-class MeetingsScreen extends StatefulWidget {
+class MeetingsScreen extends ConsumerStatefulWidget {
   final void Function(int) onNavigate;
   final ValueChanged<bool> onBusyChanged;
 
@@ -27,15 +29,19 @@ class MeetingsScreen extends StatefulWidget {
   });
 
   @override
-  State<MeetingsScreen> createState() => _MeetingsScreenState();
+  ConsumerState<MeetingsScreen> createState() => _MeetingsScreenState();
 }
 
-class _MeetingsScreenState extends State<MeetingsScreen> {
-  List<Meeting> meetings = [];
+class _MeetingsScreenState extends ConsumerState<MeetingsScreen> {
+  final _dataKey = Object();
+  late final MeetingsController _controller;
+  MeetingLoadState<List<Meeting>> get _data =>
+      ref.read(meetingsProvider(_dataKey));
+  bool get isLoading => _data.isLoading;
+  bool get busy => _data.busy;
+  String get errorMessage => _data.errorMessage;
+  List<Meeting> get meetings => _data.data;
   int tab = 0;
-  bool isLoading = false;
-  bool busy = false;
-  String errorMessage = '';
   late final Timer ticker;
 
   // Responsive: true on small phones (width < 360 px).
@@ -44,7 +50,10 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   @override
   void initState() {
     super.initState();
-    loadMeetings();
+    _controller = ref.read(meetingsProvider(_dataKey).notifier);
+    Future.microtask(() {
+      if (mounted) loadMeetings();
+    });
     ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && meetings.any((meeting) => meeting.status == 'running')) {
         setState(() {});
@@ -54,31 +63,12 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
 
   @override
   void dispose() {
+    _controller.cancelLoads();
     ticker.cancel();
     super.dispose();
   }
 
-  Future<void> loadMeetings() async {
-    setState(() {
-      isLoading = true;
-      errorMessage = '';
-    });
-    try {
-      await syncServerClock();
-      if (!mounted) return;
-      final loaded = await MeetingService.fetchMeetings();
-      if (!mounted) return;
-      setState(() => meetings = loaded);
-    } on PostgrestException catch (e) {
-      if (!mounted) return;
-      setState(() => errorMessage = e.message);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => errorMessage = 'Unable to load meetings: $e');
-    } finally {
-      if (mounted) setState(() => isLoading = false);
-    }
-  }
+  Future<void> loadMeetings() => _controller.load();
 
   Future<void> refreshMeetings() async {
     if (busy || isLoading) return;
@@ -104,7 +94,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     };
     if (!allowed) return;
     var restarted = false;
-    setState(() => busy = true);
+    _controller.setBusy(true);
     try {
       if (action != _MeetingAction.pauseResume) {
         final confirmed = await showConfirmDialog(
@@ -130,17 +120,17 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       widget.onBusyChanged(true);
       switch (action) {
         case _MeetingAction.start:
-          await MeetingService.startMeeting(meeting.id);
+          await ref.read(meetingServiceProvider).startMeeting(meeting.id);
         case _MeetingAction.pauseResume:
           if (meeting.status == 'paused') {
-            await MeetingService.resumeMeeting(meeting.id);
+            await ref.read(meetingServiceProvider).resumeMeeting(meeting.id);
           } else {
-            await MeetingService.pauseMeeting(meeting.id);
+            await ref.read(meetingServiceProvider).pauseMeeting(meeting.id);
           }
         case _MeetingAction.end:
-          await MeetingService.endMeeting(meeting.id);
+          await ref.read(meetingServiceProvider).endMeeting(meeting.id);
         case _MeetingAction.restart:
-          await MeetingService.restartMeeting(meeting.id);
+          await ref.read(meetingServiceProvider).restartMeeting(meeting.id);
           restarted = true;
       }
       if (!mounted) return;
@@ -151,25 +141,18 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       }
       await loadMeetings();
       if (!mounted) return;
-    } on PostgrestException catch (e) {
+    } catch (e, stack) {
+      final message = AppError.handle(e, stack, action: ErrorAction.meeting);
       restarted = false;
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
-      await loadMeetings();
-      if (!mounted) return;
-    } catch (e) {
-      restarted = false;
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Meeting action failed: $e')));
+      ).showSnackBar(SnackBar(content: Text(message)));
       await loadMeetings();
       if (!mounted) return;
     } finally {
       widget.onBusyChanged(false);
-      if (mounted) setState(() => busy = false);
+      if (mounted) _controller.setBusy(false);
     }
     // After the busy flag is cleared (MainScreen ignores navigation while
     // busy), take the operator to Live to continue the restarted meeting.
@@ -265,7 +248,8 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                     : null,
                 // Upcoming and finished (Previous) meetings can be deleted;
                 // running or paused ones cannot.
-                onDelete: meeting.status == 'upcoming' || meeting.status == 'done'
+                onDelete:
+                    meeting.status == 'upcoming' || meeting.status == 'done'
                     ? () => deleteMeeting(meeting)
                     : null,
               );
@@ -279,33 +263,29 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   // Coming meetings: 9 columns. Previous (finished) meetings: + Attendance.
   Future<void> downloadMeeting(Meeting meeting) async {
     if (busy || isLoading) return;
-    setState(() => busy = true);
+    _controller.setBusy(true);
     try {
-      final rows = await MeetingService.fetchRows(meeting.id);
+      final rows = await ref.read(meetingServiceProvider).fetchRows(meeting.id);
       if (!mounted) return;
       await downloadMeetingPdf(
         meeting,
         rows,
         withAttendance: meeting.status == 'done',
       );
-    } on PostgrestException catch (e) {
+    } catch (e, stack) {
+      final message = AppError.handle(e, stack, action: ErrorAction.download);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      ).showSnackBar(SnackBar(content: Text(message)));
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) _controller.setBusy(false);
     }
   }
 
   Future<void> deleteMeeting(Meeting meeting) async {
     if (busy || isLoading) return;
-    setState(() => busy = true);
+    _controller.setBusy(true);
     try {
       final confirmed = await showConfirmDialog(
         context,
@@ -317,33 +297,35 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       if (!mounted) return;
       if (!confirmed) return;
       widget.onBusyChanged(true);
-      await MeetingService.deleteMeeting(meeting.id);
+      await ref.read(meetingServiceProvider).deleteMeeting(meeting.id);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Meeting deleted')));
       await loadMeetings();
-    } on PostgrestException catch (e) {
+    } catch (e, stack) {
+      final message = AppError.handle(e, stack, action: ErrorAction.delete);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+      ).showSnackBar(SnackBar(content: Text(message)));
     } finally {
       widget.onBusyChanged(false);
-      if (mounted) setState(() => busy = false);
+      if (mounted) _controller.setBusy(false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(meetingsProvider(_dataKey));
     return Scaffold(
       body: Padding(
-        padding: EdgeInsets.fromLTRB(narrow ? 14 : 18, 60, narrow ? 14 : 18, 18),
+        padding: EdgeInsets.fromLTRB(
+          narrow ? 14 : 18,
+          60,
+          narrow ? 14 : 18,
+          18,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

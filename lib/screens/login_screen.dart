@@ -3,16 +3,18 @@ import 'package:livemeet/screens/main_screen.dart';
 import 'package:livemeet/widgets/Button.dart';
 import 'package:livemeet/widgets/CustomText.dart';
 import 'package:livemeet/widgets/TextBox.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:livemeet/providers/app_providers.dart';
+import 'package:livemeet/utils/app_error.dart';
 
-class LoginScreen extends StatefulWidget {
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen> {
   TextEditingController email = TextEditingController();
   TextEditingController password = TextEditingController();
   bool isLoading = false;
@@ -124,22 +126,31 @@ class _LoginScreenState extends State<LoginScreen> {
                     setState(() => isLoading = true);
 
                     try {
-                      await Supabase.instance.client.auth.signInWithPassword(
-                        email: email.text.trim(),
-                        password: password.text,
-                      );
+                      await ref
+                          .read(supabaseClientProvider)
+                          .auth
+                          .signInWithPassword(
+                            email: email.text.trim(),
+                            password: password.text,
+                          );
                       if (!mounted) return;
 
                       Navigator.pushReplacement(
                         this.context,
                         MaterialPageRoute(builder: (context) => MainScreen()),
                       );
-                    } catch (e) {
+                    } catch (e, stack) {
+                      final message = AppError.handle(
+                        e,
+                        stack,
+                        action: ErrorAction.signIn,
+                      );
                       if (!mounted) return;
                       ScaffoldMessenger.of(
                         this.context,
-                      ).showSnackBar(SnackBar(content: Text('Error: $e')));
-                      setState(() => isLoading = false);
+                      ).showSnackBar(SnackBar(content: Text(message)));
+                    } finally {
+                      if (mounted) setState(() => isLoading = false);
                     }
                   },
                 ),

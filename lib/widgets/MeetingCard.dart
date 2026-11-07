@@ -2,12 +2,14 @@
 // ignore_for_file: file_names
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:livemeet/providers/app_providers.dart';
 import 'package:livemeet/models/meeting.dart';
 import 'package:livemeet/utils/time_utils.dart';
 import 'package:livemeet/widgets/Button.dart';
 import 'package:livemeet/widgets/CustomText.dart';
 
-class MeetingCard extends StatelessWidget {
+class MeetingCard extends ConsumerWidget {
   final Meeting meeting;
   final bool locked;
   final bool busy;
@@ -44,7 +46,7 @@ class MeetingCard extends StatelessWidget {
   String timeLabel(DateTime? time) => time == null ? '—' : formatTime(time);
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     const labels = {
       'upcoming': 'Upcoming',
       'running': 'Running',
@@ -61,177 +63,178 @@ class MeetingCard extends StatelessWidget {
     // The card keeps its normal look when another meeting is running; only
     // the buttons that can't be used are faded (see fadeWhenDisabled).
     return AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: EdgeInsets.all(pad),
-        decoration: BoxDecoration(
-          color: meeting.isActive ? const Color(0xFFDDF35C) : Colors.white,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: CustomText(
-                    text: meeting.title,
-                    fontSize: narrow ? 16 : 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+      duration: const Duration(milliseconds: 200),
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.all(pad),
+      decoration: BoxDecoration(
+        color: meeting.isActive ? const Color(0xFFDDF35C) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: CustomText(
+                  text: meeting.title,
+                  fontSize: narrow ? 16 : 18,
+                  fontWeight: FontWeight.bold,
                 ),
-                if (onDownload != null)
-                  GestureDetector(
-                    onTap: busy ? null : onDownload,
-                    child: Opacity(
-                      opacity: busy ? 0.4 : 1,
-                      child: const Padding(
-                        padding: EdgeInsets.only(left: 8),
-                        child: Icon(Icons.download_rounded, size: 24),
-                      ),
-                    ),
-                  ),
-                if (onEdit != null)
-                  GestureDetector(
-                    onTap: busy ? null : onEdit,
-                    child: Opacity(
-                      opacity: busy ? 0.4 : 1,
-                      child: const Padding(
-                        padding: EdgeInsets.only(left: 8),
-                        child: Icon(Icons.settings_outlined, size: 24),
-                      ),
-                    ),
-                  ),
-                if (onDelete != null)
-                  GestureDetector(
-                    onTap: busy ? null : onDelete,
-                    child: Opacity(
-                      opacity: busy ? 0.4 : 1,
-                      child: const Padding(
-                        padding: EdgeInsets.only(left: 8),
-                        child: Icon(
-                          Icons.delete_outline_rounded,
-                          size: 24,
-                          color: Colors.red,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 5),
-            Row(
-              children: [
-                chip(labels[meeting.status] ?? meeting.status),
-                const SizedBox(width: 5),
-                Expanded(
-                  child: CustomText(
-                    text: formatDate(meeting.meetingDate),
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            CustomText(
-              text:
-                  '${meeting.groupsTotal} groups · ${meeting.studentsTotal} students',
-            ),
-            const SizedBox(height: 10),
-            if (meeting.status == 'upcoming')
-              const CustomText(text: 'Not started'),
-            if (meeting.isActive) ...[
-              CustomText(text: 'Started ${timeLabel(startedAt)}'),
-              CustomText(
-                text: startedAt == null
-                    ? '—'
-                    : formatClock(
-                        elapsedSec(
-                          startedAt: startedAt,
-                          pausedSeconds: meeting.pausedSeconds,
-                          frozenAt: meeting.pausedAt,
-                        ),
-                      ),
-                fontSize: narrow ? 24 : 28,
-                fontWeight: FontWeight.bold,
               ),
-              if (meeting.groupsPaused > 0)
-                CustomText(
-                  text: '${meeting.groupsPaused} group(s) paused',
+              if (onDownload != null)
+                GestureDetector(
+                  onTap: busy ? null : onDownload,
+                  child: Opacity(
+                    opacity: busy ? 0.4 : 1,
+                    child: const Padding(
+                      padding: EdgeInsets.only(left: 8),
+                      child: Icon(Icons.download_rounded, size: 24),
+                    ),
+                  ),
+                ),
+              if (onEdit != null)
+                GestureDetector(
+                  onTap: busy ? null : onEdit,
+                  child: Opacity(
+                    opacity: busy ? 0.4 : 1,
+                    child: const Padding(
+                      padding: EdgeInsets.only(left: 8),
+                      child: Icon(Icons.settings_outlined, size: 24),
+                    ),
+                  ),
+                ),
+              if (onDelete != null)
+                GestureDetector(
+                  onTap: busy ? null : onDelete,
+                  child: Opacity(
+                    opacity: busy ? 0.4 : 1,
+                    child: const Padding(
+                      padding: EdgeInsets.only(left: 8),
+                      child: Icon(
+                        Icons.delete_outline_rounded,
+                        size: 24,
+                        color: Colors.red,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Row(
+            children: [
+              chip(labels[meeting.status] ?? meeting.status),
+              const SizedBox(width: 5),
+              Expanded(
+                child: CustomText(
+                  text: formatDate(meeting.meetingDate),
                   fontSize: 12,
                 ),
+              ),
             ],
-            if (meeting.status == 'done') ...[
+          ),
+          const SizedBox(height: 10),
+          CustomText(
+            text:
+                '${meeting.groupsTotal} groups · ${meeting.studentsTotal} students',
+          ),
+          const SizedBox(height: 10),
+          if (meeting.status == 'upcoming')
+            const CustomText(text: 'Not started'),
+          if (meeting.isActive) ...[
+            CustomText(text: 'Started ${timeLabel(startedAt)}'),
+            CustomText(
+              text: startedAt == null
+                  ? '—'
+                  : formatClock(
+                      elapsedSec(
+                        now: ref.read(serverClockProvider.notifier).now(),
+                        startedAt: startedAt,
+                        pausedSeconds: meeting.pausedSeconds,
+                        frozenAt: meeting.pausedAt,
+                      ),
+                    ),
+              fontSize: narrow ? 24 : 28,
+              fontWeight: FontWeight.bold,
+            ),
+            if (meeting.groupsPaused > 0)
               CustomText(
-                text:
-                    'Started ${timeLabel(startedAt)} · Ended ${timeLabel(meeting.endedAt)}',
+                text: '${meeting.groupsPaused} group(s) paused',
+                fontSize: 12,
               ),
-              const SizedBox(height: 5),
-              chip(
-                'Total ${meeting.totalSeconds == null ? '—' : formatTotal(meeting.totalSeconds!)}',
-              ),
-              const SizedBox(height: 5),
-              CustomText(
-                text:
-                    'Done ${meeting.groupsDone} · Skipped ${meeting.groupsSkipped}'
-                    '${meeting.groupsPaused > 0 ? ' · Paused ${meeting.groupsPaused}' : ''}',
-              ),
-              // Restart is offered only when some group is not finished.
-              if (onRestart != null && meeting.groupsIncomplete > 0) ...[
-                const SizedBox(height: 10),
-                Button(
-                  text: 'Restart',
-                  height: 48,
-                  fontSize: narrow ? 14 : 15,
-                  enabled: enabled,
-                  fadeWhenDisabled: true,
-                  onTap: onRestart,
-                ),
-              ],
-            ],
-            if (meeting.status != 'done') ...[
+          ],
+          if (meeting.status == 'done') ...[
+            CustomText(
+              text:
+                  'Started ${timeLabel(startedAt)} · Ended ${timeLabel(meeting.endedAt)}',
+            ),
+            const SizedBox(height: 5),
+            chip(
+              'Total ${meeting.totalSeconds == null ? '—' : formatTotal(meeting.totalSeconds!)}',
+            ),
+            const SizedBox(height: 5),
+            CustomText(
+              text:
+                  'Done ${meeting.groupsDone} · Skipped ${meeting.groupsSkipped}'
+                  '${meeting.groupsPaused > 0 ? ' · Paused ${meeting.groupsPaused}' : ''}',
+            ),
+            // Restart is offered only when some group is not finished.
+            if (onRestart != null && meeting.groupsIncomplete > 0) ...[
               const SizedBox(height: 10),
-              Row(
-                spacing: narrow ? 6 : 10,
-                children: [
-                  Expanded(
-                    child: Button(
-                      text: 'Start',
-                      height: 48,
-                      fontSize: narrow ? 14 : 15,
-                      enabled: enabled && meeting.status == 'upcoming',
-                      fadeWhenDisabled: true,
-                      onTap: onStart,
-                    ),
-                  ),
-                  Expanded(
-                    child: Button(
-                      text: meeting.status == 'paused' ? 'Resume' : 'Pause',
-                      height: 48,
-                      fontSize: narrow ? 14 : 15,
-                      enabled: enabled && meeting.isActive,
-                      fadeWhenDisabled: true,
-                      onTap: onPauseResume,
-                    ),
-                  ),
-                  Expanded(
-                    child: Button(
-                      text: 'End',
-                      height: 48,
-                      fontSize: narrow ? 14 : 15,
-                      enabled: enabled && meeting.isActive,
-                      fadeWhenDisabled: true,
-                      onTap: onEnd,
-                    ),
-                  ),
-                ],
+              Button(
+                text: 'Restart',
+                height: 48,
+                fontSize: narrow ? 14 : 15,
+                enabled: enabled,
+                fadeWhenDisabled: true,
+                onTap: onRestart,
               ),
             ],
           ],
-        ),
+          if (meeting.status != 'done') ...[
+            const SizedBox(height: 10),
+            Row(
+              spacing: narrow ? 6 : 10,
+              children: [
+                Expanded(
+                  child: Button(
+                    text: 'Start',
+                    height: 48,
+                    fontSize: narrow ? 14 : 15,
+                    enabled: enabled && meeting.status == 'upcoming',
+                    fadeWhenDisabled: true,
+                    onTap: onStart,
+                  ),
+                ),
+                Expanded(
+                  child: Button(
+                    text: meeting.status == 'paused' ? 'Resume' : 'Pause',
+                    height: 48,
+                    fontSize: narrow ? 14 : 15,
+                    enabled: enabled && meeting.isActive,
+                    fadeWhenDisabled: true,
+                    onTap: onPauseResume,
+                  ),
+                ),
+                Expanded(
+                  child: Button(
+                    text: 'End',
+                    height: 48,
+                    fontSize: narrow ? 14 : 15,
+                    enabled: enabled && meeting.isActive,
+                    fadeWhenDisabled: true,
+                    onTap: onEnd,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

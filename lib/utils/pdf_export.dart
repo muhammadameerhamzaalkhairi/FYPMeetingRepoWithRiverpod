@@ -1,3 +1,4 @@
+import 'package:livemeet/utils/app_error.dart';
 import 'dart:math' as math;
 
 import 'package:livemeet/models/meeting.dart';
@@ -14,13 +15,24 @@ const _absent = PdfColor.fromInt(0xFFD32F2F);
 
 const _fs = 8.5; // body font size
 const _months = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 String _two(int n) => n.toString().padLeft(2, '0');
 String _isoDate(DateTime d) => '${d.year}-${_two(d.month)}-${_two(d.day)}';
-String _shortDate(DateTime d) => '${_two(d.day)} ${_months[d.month - 1]} ${d.year}';
+String _shortDate(DateTime d) =>
+    '${_two(d.day)} ${_months[d.month - 1]} ${d.year}';
 
 bool _held(String? status) =>
     status == 'running' || status == 'paused' || status == 'done';
@@ -85,10 +97,7 @@ pw.Widget _cell(
     height: height,
     alignment: center ? pw.Alignment.center : pw.Alignment.centerLeft,
     padding: const pw.EdgeInsets.symmetric(horizontal: 4),
-    decoration: pw.BoxDecoration(
-      color: header ? _green : null,
-      border: border,
-    ),
+    decoration: pw.BoxDecoration(color: header ? _green : null, border: border),
     child: pw.Text(
       text,
       textAlign: center ? pw.TextAlign.center : pw.TextAlign.left,
@@ -128,14 +137,19 @@ Future<void> downloadMeetingPdf(
   List<Map<String, dynamic>> rows, {
   required bool withAttendance,
 }) async {
-  if (rows.isEmpty) throw Exception('This meeting has no students.');
+  if (rows.isEmpty) {
+    throw const UserMessageException(
+      'This meeting has no students to export. Add students before downloading the PDF.',
+    );
+  }
 
   // Always group 1, 2, 3... (then the DB row order inside a group).
-  rows = [...rows]..sort((a, b) {
-    final byGroup = (a['group_no'] as num).compareTo(b['group_no'] as num);
-    if (byGroup != 0) return byGroup;
-    return ((a['id'] as num?) ?? 0).compareTo((b['id'] as num?) ?? 0);
-  });
+  rows = [...rows]
+    ..sort((a, b) {
+      final byGroup = (a['group_no'] as num).compareTo(b['group_no'] as num);
+      if (byGroup != 0) return byGroup;
+      return ((a['id'] as num?) ?? 0).compareTo((b['id'] as num?) ?? 0);
+    });
   final groups = <int, List<Map<String, dynamic>>>{};
   for (final r in rows) {
     groups.putIfAbsent((r['group_no'] as num).toInt(), () => []).add(r);
@@ -145,13 +159,6 @@ Future<void> downloadMeetingPdf(
   final firstRows = [for (final g in groups.values) g.first];
   final attended = firstRows.where((r) => _held(r['status'] as String?)).length;
   final skipped = firstRows.where((r) => r['status'] == 'skipped').length;
-  final started = meeting.startedAt;
-  final ended = meeting.endedAt;
-  final startText = started == null ? 'Not started' : formatTime(started);
-  final endText = ended != null
-      ? formatTime(ended)
-      : (started == null ? '-' : 'In progress');
-
   // ------- columns --------
   final labels = [
     'S.No',
@@ -166,7 +173,18 @@ Future<void> downloadMeetingPdf(
     if (withAttendance) 'Attendance',
   ];
 
-  final base = <double>[34, 88, 112, 80, 150, 72, 58, 62, 52, if (withAttendance) 62];
+  final base = <double>[
+    34,
+    88,
+    112,
+    80,
+    150,
+    72,
+    58,
+    62,
+    52,
+    if (withAttendance) 62,
+  ];
   final pageWidth = PdfPageFormat.a4.landscape.width - 56; // 28pt margins
   final scale = pageWidth / base.fold<double>(0, (a, b) => a + b);
   final w = [for (final b in base) b * scale];
@@ -182,7 +200,9 @@ Future<void> downloadMeetingPdf(
     final head = g.first;
     final supervisor = '${head['supervisor'] ?? ''}';
     final project = '${head['project'] ?? ''}';
-    final start = formatTime(DateTime.parse('2000-01-01T${head['meeting_time']}'));
+    final start = formatTime(
+      DateTime.parse('2000-01-01T${head['meeting_time']}'),
+    );
     final total = _total(head);
 
     // Student-level texts, one per row.
@@ -314,8 +334,6 @@ Future<void> downloadMeetingPdf(
                   _stat('Total Groups', '${groups.length}'),
                   _stat('Groups Attended', '$attended'),
                   _stat('Groups Skipped', '$skipped'),
-                  // _stat('Actual Start Time', startText),
-                  // _stat('Actual End Time', endText),
                 ],
               ),
             ),
@@ -333,5 +351,8 @@ Future<void> downloadMeetingPdf(
     ),
   );
 
-  await Printing.sharePdf(bytes: await doc.save(), filename: _fileName(meeting));
+  await Printing.sharePdf(
+    bytes: await doc.save(),
+    filename: _fileName(meeting),
+  );
 }
