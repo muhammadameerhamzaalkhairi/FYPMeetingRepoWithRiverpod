@@ -55,6 +55,9 @@ class _Group {
   );
 }
 
+// Global clipboard: survives leaving/opening other meetings' edit screens.
+_Group? _clipboard;
+
 // A group with progress (running / paused / done / skipped). The DB never
 // changes these, so they are shown read-only and never sent back.
 class _Locked {
@@ -99,7 +102,10 @@ class _EditMeetingScreenState extends State<EditMeetingScreen> {
   final List<_Snap> undoStack = [];
   final List<_Snap> redoStack = [];
   int? expanded; // uid of the expanded group
-  _Group? copied; // group copied from the three-dots menu, ready to paste
+
+  _Group? get copied => _clipboard;
+  set copied(_Group? value) => _clipboard = value;
+
   final scroll = ScrollController();
   bool isLoading = true;
   bool busy = false;
