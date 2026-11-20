@@ -12,6 +12,7 @@ import 'package:livemeet/utils/time_utils.dart';
 import 'package:livemeet/widgets/Button.dart';
 import 'package:livemeet/widgets/CustomText.dart';
 import 'package:livemeet/widgets/confirm_dialog.dart';
+import 'package:livemeet/widgets/notification_dialog.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   final void Function(int) onNavigate;
@@ -67,6 +68,30 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   Future<void> loadMeeting() async {
     await _controller.load(action: ErrorAction.loadMeeting);
+  }
+
+  bool get canSendNotification =>
+      !busy &&
+      !isLoading &&
+      errorMessage.isEmpty &&
+      meeting?.status == 'running' &&
+      ref.read(meetingServiceProvider).canSendNotifications;
+
+  Future<void> sendNotification() async {
+    if (!canSendNotification) return;
+    _controller.setBusy(true);
+    widget.onBusyChanged(true);
+    try {
+      final sent = await showNotificationDialog(context);
+      if (mounted && sent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Notification sent successfully.')),
+        );
+      }
+    } finally {
+      widget.onBusyChanged(false);
+      if (mounted) _controller.setBusy(false);
+    }
   }
 
   Map<String, dynamic>? get runningGroup =>
@@ -499,105 +524,157 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     ref.watch(activeMeetingProvider(_dataKey));
     final active = meeting;
     final ready = !isLoading && errorMessage.isEmpty;
+    final enabled = canSendNotification;
     return Scaffold(
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            narrow ? 14 : 18,
-            60,
-            narrow ? 14 : 18,
-            18,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CustomText(
-                text: formatDate(active?.meetingDate ?? DateTime.now()),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButton: ready && active?.status == 'running'
+          ? FloatingActionButton(
+              tooltip: 'Send Notification',
+              onPressed: enabled ? sendNotification : null,
+              backgroundColor: Colors.black,
+              foregroundColor: enabled ? Colors.white : Colors.white54,
+              elevation: 4,
+              disabledElevation: 0,
+              child: const Icon(Icons.notifications_outlined),
+            )
+          : null,
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                narrow ? 14 : 18,
+                60,
+                narrow ? 14 : 18,
+                ready && active == null ? 0 : 88,
               ),
-              Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: CustomText(
-                      text: !ready
-                          ? 'Home'
-                          : active == null
-                          ? 'No meeting is running'
-                          : active.status == 'paused'
-                          ? 'Meeting is paused'
-                          : 'Meeting is live',
-                      fontSize: narrow ? 30 : 38,
-                      fontWeight: FontWeight.w900,
-                      height: 1,
+                  CustomText(
+                    text: formatDate(active?.meetingDate ?? DateTime.now()),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: CustomText(
+                          text: !ready || active == null
+                              ? 'Home'
+                              : active.status == 'paused'
+                              ? 'Meeting is paused'
+                              : 'Meeting is live',
+                          fontSize: narrow ? 30 : 38,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Logout',
+                        onPressed: busy ? null : logout,
+                        icon: const Icon(Icons.logout),
+                        color: const Color(0xFF111111),
+                      ),
+                      //   Button(
+                      //     text: 'Log out',
+                      //     fontWeight: FontWeight.bold,
+                      //     height: 50,
+                      //     fontSize: 14,
+                      //     enabled: !busy,
+                      //     onTap: busy ? null : logout,
+                      // ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (isLoading)
+                    const Center(child: CircularProgressIndicator())
+                  else if (errorMessage.isNotEmpty) ...[
+                    CustomText(text: errorMessage, color: Colors.red),
+                    const SizedBox(height: 10),
+                    Button(text: 'Retry', onTap: loadMeeting),
+                  ] else if (active != null) ...[
+                    liveCard(active),
+                    const SizedBox(height: 10),
+                    Row(
+                      spacing: narrow ? 6 : 10,
+                      children: [
+                        counter('Done', active.groupsDone),
+                        counter('Remaining', active.groupsRemaining),
+                        counter('Total', active.groupsTotal),
+                      ],
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'Logout',
-                    onPressed: busy ? null : logout,
-                    icon: const Icon(Icons.logout),
-                    color: const Color(0xFF111111),
-                  ),
-                  //   Button(
-                  //     text: 'Log out',
-                  //     fontWeight: FontWeight.bold,
-                  //     height: 50,
-                  //     fontSize: 14,
-                  //     enabled: !busy,
-                  //     onTap: busy ? null : logout,
-                  // ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: CustomText(
+                            text: 'Up next',
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => widget.onNavigate(kLive),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.black,
+                          ),
+                          child: const Text('See all'),
+                        ),
+                      ],
+                    ),
+                    upNextList(),
+                  ],
                 ],
               ),
-              const SizedBox(height: 10),
-              if (isLoading)
-                const Center(child: CircularProgressIndicator())
-              else if (errorMessage.isNotEmpty) ...[
-                CustomText(text: errorMessage, color: Colors.red),
-                const SizedBox(height: 10),
-                Button(text: 'Retry', onTap: loadMeeting),
-              ] else if (active == null) ...[
-                const CustomText(
-                  text:
-                      'Start a meeting from the Meetings tab to see its live status here.',
-                ),
-                const SizedBox(height: 10),
-                Button(
-                  text: 'Go to Meetings',
-                  onTap: () => widget.onNavigate(kMeetings),
-                ),
-              ] else ...[
-                liveCard(active),
-                const SizedBox(height: 10),
-                Row(
-                  spacing: narrow ? 6 : 10,
-                  children: [
-                    counter('Done', active.groupsDone),
-                    counter('Remaining', active.groupsRemaining),
-                    counter('Total', active.groupsTotal),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    const Expanded(
-                      child: CustomText(
-                        text: 'Up next',
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => widget.onNavigate(kLive),
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.black,
-                      ),
-                      child: const Text('See all'),
-                    ),
-                  ],
-                ),
-                upNextList(),
-              ],
-            ],
+            ),
           ),
-        ),
+          if (ready && active == null)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 88),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 320),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircleAvatar(
+                          radius: 30,
+                          backgroundColor: Colors.transparent,
+
+                          // child: Icon(
+                          //   Icons.groups_outlined,
+                          //   size: 32,
+                          //   color: Colors.black,
+                          // ),
+                          backgroundImage: AssetImage('lib/assets/images/logo.png'),
+                        ),
+                        const SizedBox(height: 16),
+                        const CustomText(
+                          text: 'No meeting is running',
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        const CustomText(
+                          text:
+                              'Start a meeting from the Meetings tab to see its live status here.',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        Button(
+                          text: 'Go to Meetings',
+                          height: 50,
+                          onTap: () => widget.onNavigate(kMeetings),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

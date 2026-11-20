@@ -1,10 +1,39 @@
 import 'package:livemeet/utils/app_error.dart';
 import 'package:livemeet/models/meeting.dart';
+import 'package:livemeet/models/notification_message.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class MeetingService {
   MeetingService(this._db);
   final SupabaseClient _db;
+  final _groupStarts = <(int, int), Future<void>>{};
+
+  bool get canSendNotifications => _db.auth.currentSession != null;
+
+  Future<void> sendCustomNotification(String message) async {
+    final trimmed = message.trim();
+    final error = NotificationMessage.validate(trimmed);
+    if (error != null) throw UserMessageException(error);
+    if (!canSendNotifications) {
+      throw const UserMessageException(AppError.sessionExpired);
+    }
+    final running = await _db
+        .from('meetings')
+        .select('id')
+        .eq('status', 'running')
+        .limit(1);
+    if (running.isEmpty) {
+      throw const UserMessageException(
+        'Notifications can only be sent while a meeting is running.',
+      );
+    }
+    await _db.from('notifications').insert({
+      'meeting_id': null,
+      'group_no': null,
+      'kind': 'custom',
+      'message': trimmed,
+    });
+  }
 
   Future<DateTime> fetchServerNow() async {
     final result = await _db.rpc('server_now');
@@ -91,7 +120,16 @@ class MeetingService {
 
   /// Starts an upcoming group. [present] = reg numbers of present students;
   /// null means everyone is present (the DB default).
-  Future<void> startGroup(
+  Future<void> startGroup(int meetingId, int groupNo, {List<String>? present}) {
+    final key = (meetingId, groupNo);
+    // Repeated taps share the pending start, including across tab visits.
+    return _groupStarts[key] ??=
+        _startGroup(meetingId, groupNo, present: present).whenComplete(() {
+          _groupStarts.remove(key);
+        });
+  }
+
+  Future<void> _startGroup(
     int meetingId,
     int groupNo, {
     List<String>? present,

@@ -47,6 +47,8 @@ Map<String, dynamic> rowFixture({
 };
 
 class FakeMeetingService implements MeetingService {
+  @override
+  bool canSendNotifications = true;
   List<Map<String, dynamic>>? savedRows;
   String? savedTitle;
   Set<String> existingDates = {};

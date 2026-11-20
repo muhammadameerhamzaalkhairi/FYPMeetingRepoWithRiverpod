@@ -15,6 +15,7 @@ enum ErrorAction {
   loadGroups,
   meeting,
   group,
+  notification,
   attendance,
   preview,
   importSchedule,
@@ -182,6 +183,8 @@ class AppError {
       ErrorAction.meeting =>
         'Unable to update the meeting. Refresh and try again.',
       ErrorAction.group => 'Unable to update the group. Refresh and try again.',
+      ErrorAction.notification =>
+        'Unable to send the notification. Please try again.',
       ErrorAction.attendance => 'Unable to save attendance. Please try again.',
       ErrorAction.preview =>
         'Unable to open this file. Choose a valid .xlsx file and try again.',
